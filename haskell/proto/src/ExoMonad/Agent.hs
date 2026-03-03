@@ -46,14 +46,15 @@ import qualified ExoMonad.Common
 data AgentType
   = AgentTypeAGENT_TYPE_UNSPECIFIED |
     AgentTypeAGENT_TYPE_CLAUDE |
-    AgentTypeAGENT_TYPE_GEMINI
+    AgentTypeAGENT_TYPE_GEMINI |
+    AgentTypeAGENT_TYPE_SHOAL
   deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
 instance (HsProtobuf.Named AgentType) where
   nameOf _ = Hs.fromString "AgentType"
 instance (HsProtobuf.HasDefault AgentType)
 instance (Hs.Bounded AgentType) where
   minBound = AgentTypeAGENT_TYPE_UNSPECIFIED
-  maxBound = AgentTypeAGENT_TYPE_GEMINI
+  maxBound = AgentTypeAGENT_TYPE_SHOAL
 instance (Hs.Ord AgentType) where
   compare x y
     = Hs.compare
@@ -62,10 +63,12 @@ instance (HsProtobuf.ProtoEnum AgentType) where
   toProtoEnumMay 0 = Hs.Just AgentTypeAGENT_TYPE_UNSPECIFIED
   toProtoEnumMay 1 = Hs.Just AgentTypeAGENT_TYPE_CLAUDE
   toProtoEnumMay 2 = Hs.Just AgentTypeAGENT_TYPE_GEMINI
+  toProtoEnumMay 3 = Hs.Just AgentTypeAGENT_TYPE_SHOAL
   toProtoEnumMay _ = Hs.Nothing
   fromProtoEnum AgentTypeAGENT_TYPE_UNSPECIFIED = 0
   fromProtoEnum AgentTypeAGENT_TYPE_CLAUDE = 1
   fromProtoEnum AgentTypeAGENT_TYPE_GEMINI = 2
+  fromProtoEnum AgentTypeAGENT_TYPE_SHOAL = 3
 instance (HsJSONPB.ToJSONPB AgentType) where
   toJSONPB x _ = HsJSONPB.enumFieldString x
   toEncodingPB x _ = HsJSONPB.enumFieldEncoding x
@@ -76,6 +79,8 @@ instance (HsJSONPB.FromJSONPB AgentType) where
     = Hs.pure AgentTypeAGENT_TYPE_CLAUDE
   parseJSONPB (HsJSONPB.String "AGENT_TYPE_GEMINI")
     = Hs.pure AgentTypeAGENT_TYPE_GEMINI
+  parseJSONPB (HsJSONPB.String "AGENT_TYPE_SHOAL")
+    = Hs.pure AgentTypeAGENT_TYPE_SHOAL
   parseJSONPB v = HsJSONPB.typeMismatch "AgentType" v
 instance (HsJSONPB.ToJSON AgentType) where
   toJSON = HsJSONPB.toAesonValue
