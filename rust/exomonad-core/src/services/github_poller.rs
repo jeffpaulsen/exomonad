@@ -520,6 +520,7 @@ impl GitHubPoller {
             crate::services::delivery::deliver_to_agent(
                 self.team_registry.as_deref(),
                 self.acp_registry.as_deref(),
+                &self.project_dir,
                 branch,
                 &tab_name,
                 "github-poller",

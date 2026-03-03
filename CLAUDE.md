@@ -193,6 +193,10 @@ Spawn heterogeneous agent teams as a recursive tree:
 - **`spawn_leaf_subtree`** — Fork a Gemini agent into its own git worktree + Zellij tab. Gets dev role, files PR when done.
 - **`spawn_workers`** — Spawn multiple Gemini agents as Zellij panes in the parent's directory. Ephemeral (no branch, no worktree). Config in `.exo/agents/{name}/`.
 
+**Agent Types:** `Claude` (🤖), `Gemini` (💎), `Shoal` (🌊). Shoal is for custom binary agents that connect via rmcp MCP client and receive notifications via HTTP-over-Unix-domain-socket at `.exo/agents/{name}/notify.sock`.
+
+**Multi-WASM:** The server loads multiple WASM modules from `.exo/wasm/`. Convention: if `wasm-guest-{role}.wasm` exists, it's used for that role; otherwise falls back to `wasm-guest-{wasm_name}.wasm` (default). Drop a WASM file, it's available.
+
 **Standalone repo mode:** Both `spawn_subtree` and `spawn_leaf_subtree` accept `standalone_repo: true`. Instead of a git worktree (which shares `.git` with the parent), this creates a fresh `git init` repo. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
 
 **Permissions:** `spawn_subtree` accepts optional `permissions` (Claude-only, not available on Gemini spawns). The Haskell DSL (`ClaudePermissions` with `ToolPattern` sum type) renders to Claude Code's native `permissions.allow`/`permissions.deny` format in `settings.local.json`. Combine with `--permission-mode dontAsk` for deny-by-default allowlisting.
@@ -232,7 +236,8 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | Feature | Status |
 |---------|--------|
 | **Teams inbox delivery** | **Live.** `notify_parent` → Teams inbox → native `<teammate-message>` in parent conversation. Full E2E verified. |
-| **ACP messaging** (Gemini agents) | **Built.** Structured JSON-RPC messaging via Agent Client Protocol. `AcpRegistry` manages connections, `connect_and_prompt()` establishes ACP sessions. Delivery priority: Teams inbox → ACP prompt → Zellij STDIN. Vendor SDK patched for Send safety. |
+| **ACP messaging** (Gemini agents) | **Built.** Structured JSON-RPC messaging via Agent Client Protocol. `AcpRegistry` manages connections, `connect_and_prompt()` establishes ACP sessions. Delivery priority: Teams inbox → ACP prompt → HTTP-over-UDS → Zellij STDIN. Vendor SDK patched for Send safety. |
+| **HTTP-over-UDS delivery** (Shoal/custom agents) | **Built.** `notify_parent` → POST to `.exo/agents/{name}/notify.sock`. Fire-and-forget with 5s timeout. For custom binary agents that run their own HTTP server on a Unix socket. |
 | **Event router** (Zellij STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status and injects notifications into agent panes. |
 | **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` or `jq`. Events: `agent.spawned`, `agent.completed`, `pr.filed`, `pr.merged`, `copilot.review`, `ci.status_changed`. |

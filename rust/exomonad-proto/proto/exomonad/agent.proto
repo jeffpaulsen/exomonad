@@ -10,6 +10,7 @@ enum AgentType {
   AGENT_TYPE_UNSPECIFIED = 0;
   AGENT_TYPE_CLAUDE = 1;   // Claude Code agent
   AGENT_TYPE_GEMINI = 2;   // Gemini agent
+  AGENT_TYPE_SHOAL = 3;    // Custom binary agent (e.g., shoal-agent)
 }
 
 // Current status of an agent.

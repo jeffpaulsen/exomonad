@@ -44,7 +44,7 @@ Agent Client Protocol (ACP) provides structured JSON-RPC messaging to Gemini age
 - `services/acp_registry.rs` — `AcpRegistry` (connection store) + `connect_and_prompt()` (spawn + handshake + first prompt)
 - `services/acp_client.rs` — `ExoMonadAcpClient` (implements ACP `Client` trait: auto-approve permissions, log notifications)
 
-**Delivery priority** (in `services/delivery.rs`): Teams inbox → ACP prompt → Zellij STDIN injection.
+**Delivery priority** (in `services/delivery.rs`): Teams inbox → ACP prompt → HTTP-over-UDS (`.exo/agents/{name}/notify.sock`) → Zellij STDIN injection.
 
 **Vendor patches:** `vendor/acp-rust-sdk/` has Send patches (Rc→Arc, LocalBoxFuture→BoxFuture, async_trait(?Send)→async_trait) to work with tokio's multi-threaded runtime.
 

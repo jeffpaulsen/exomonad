@@ -14,6 +14,7 @@ enum AgentType {
   AGENT_TYPE_UNSPECIFIED = 0;
   AGENT_TYPE_CLAUDE = 1;
   AGENT_TYPE_GEMINI = 2;
+  AGENT_TYPE_SHOAL = 3;
 }
 
 // Agent execution status.

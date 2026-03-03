@@ -459,6 +459,9 @@ impl Role {
     pub fn worker() -> Self {
         Self("worker".into())
     }
+    pub fn shoal() -> Self {
+        Self("shoal".into())
+    }
 
     pub fn as_str(&self) -> &str {
         &self.0
@@ -1191,6 +1194,7 @@ mod proptest_tests {
         prop_oneof![
             Just(crate::services::agent_control::AgentType::Claude),
             Just(crate::services::agent_control::AgentType::Gemini),
+            Just(crate::services::agent_control::AgentType::Shoal),
         ]
     }
 }

@@ -66,6 +66,9 @@ pub enum AgentType {
     /// Default agent type.
     #[default]
     Gemini,
+
+    /// Custom binary agent (e.g., shoal-agent).
+    Shoal,
 }
 
 /// Static metadata for each agent type, replacing per-method match dispatch.
@@ -90,11 +93,19 @@ const GEMINI_META: AgentMetadata = AgentMetadata {
     emoji: "\u{1F48E}", // 💎
 };
 
+const SHOAL_META: AgentMetadata = AgentMetadata {
+    command: "shoal-agent",
+    prompt_flag: "",
+    suffix: "shoal",
+    emoji: "\u{1F30A}", // 🌊
+};
+
 impl AgentType {
     fn meta(&self) -> &'static AgentMetadata {
         match self {
             AgentType::Claude => &CLAUDE_META,
             AgentType::Gemini => &GEMINI_META,
+            AgentType::Shoal => &SHOAL_META,
         }
     }
 
@@ -130,6 +141,8 @@ impl AgentType {
     pub fn from_dir_name(dir_name: &str) -> Self {
         if dir_name.ends_with("-claude") {
             AgentType::Claude
+        } else if dir_name.ends_with("-shoal") {
+            AgentType::Shoal
         } else {
             AgentType::Gemini
         }
@@ -736,6 +749,7 @@ impl AgentControlService {
             let role = match options.agent_type {
                 AgentType::Claude => "tl",
                 AgentType::Gemini => "dev",
+                AgentType::Shoal => "shoal",
             };
             self.write_agent_mcp_config(
                 &effective_project_dir,
@@ -1895,7 +1909,7 @@ impl AgentControlService {
                 }
                 flags
             }
-            AgentType::Gemini => String::new(),
+            AgentType::Gemini | AgentType::Shoal => String::new(),
         };
 
         let agent_command = match (prompt, fork_session_id) {
@@ -2150,6 +2164,12 @@ impl AgentControlService {
                 fs::write(gemini_dir.join("settings.json"), mcp_content).await?;
                 info!(agent_dir = %agent_dir.display(), role = %role, "Wrote .gemini/settings.json for Gemini agent");
             }
+            AgentType::Shoal => {
+                let exo_dir = agent_dir.join(".exo");
+                fs::create_dir_all(&exo_dir).await?;
+                fs::write(exo_dir.join("mcp.json"), mcp_content).await?;
+                info!(agent_dir = %agent_dir.display(), role = %role, "Wrote .exo/mcp.json for Shoal agent");
+            }
         }
         Ok(())
     }
@@ -2207,6 +2227,14 @@ impl AgentControlService {
     ]
   }}
 }}"###,
+                    port = port,
+                    role = role,
+                    name = name,
+                )
+            }
+            AgentType::Shoal => {
+                format!(
+                    r###"{{"url": "http://localhost:{port}/agents/{role}/{name}/mcp"}}"###,
                     port = port,
                     role = role,
                     name = name,
@@ -2310,6 +2338,7 @@ mod tests {
         let agent_type = match agent_suffix {
             "claude" => Some(super::AgentType::Claude),
             "gemini" => Some(super::AgentType::Gemini),
+            "shoal" => Some(super::AgentType::Shoal),
             _ => None,
         };
         Some(ParsedAgentDirName {

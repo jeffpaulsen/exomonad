@@ -32,6 +32,8 @@ pub struct EventHandler {
     /// ACP connection registry for prompt-based delivery.
     acp_registry: Option<Arc<AcpRegistry>>,
     event_log: Option<Arc<EventLog>>,
+    /// Project root directory for resolving UDS socket paths.
+    project_dir: std::path::PathBuf,
 }
 
 impl EventHandler {
@@ -39,6 +41,7 @@ impl EventHandler {
         queue: Arc<EventQueue>,
         remote_port: Option<u16>,
         event_queue_scope: Option<String>,
+        project_dir: std::path::PathBuf,
     ) -> Self {
         let remote_url = remote_port.map(|port| format!("http://127.0.0.1:{}/events", port));
         Self {
@@ -50,6 +53,7 @@ impl EventHandler {
             team_registry: None,
             acp_registry: None,
             event_log: None,
+            project_dir,
         }
     }
 
@@ -280,6 +284,7 @@ impl EventEffects for EventHandler {
         let delivery_result = crate::services::delivery::deliver_to_agent(
             self.team_registry.as_deref(),
             self.acp_registry.as_deref(),
+            &self.project_dir,
             &parent_key,
             &tab_name,
             &agent_id_str,
@@ -292,6 +297,7 @@ impl EventEffects for EventHandler {
             let delivery_method = match delivery_result {
                 DeliveryResult::Teams => "teams_inbox",
                 DeliveryResult::Acp => "acp",
+                DeliveryResult::Uds => "unix_socket",
                 DeliveryResult::Zellij => "zellij_stdin",
                 DeliveryResult::Failed => "failed",
             };
@@ -373,7 +379,7 @@ mod tests {
     #[test]
     fn test_event_handler_namespace() {
         let queue = Arc::new(EventQueue::new());
-        let handler = EventHandler::new(queue, None, None);
+        let handler = EventHandler::new(queue, None, None, std::path::PathBuf::from("."));
         assert_eq!(handler.namespace(), "events");
     }
 }

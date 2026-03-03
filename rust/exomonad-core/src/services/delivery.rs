@@ -8,18 +8,67 @@ use tracing::{debug, info, warn};
 pub enum DeliveryResult {
     Teams,
     Acp,
+    Uds,
     Zellij,
     Failed,
+}
+
+/// Deliver a notification via HTTP POST over a Unix domain socket.
+/// Fire-and-forget with 5s timeout.
+async fn deliver_via_uds(
+    socket_path: &std::path::Path,
+    from: &str,
+    message: &str,
+    summary: &str,
+) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    use std::time::Duration;
+
+    let body = serde_json::json!({
+        "from": from,
+        "message": message,
+        "summary": summary,
+    });
+    let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
+
+    let request = format!(
+        "POST /notify HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body_bytes.len()
+    );
+
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut stream = UnixStream::connect(socket_path).await.map_err(|e| e.to_string())?;
+        stream.write_all(request.as_bytes()).await.map_err(|e| e.to_string())?;
+        stream.write_all(&body_bytes).await.map_err(|e| e.to_string())?;
+        stream.flush().await.map_err(|e| e.to_string())?;
+
+        let mut buf = [0u8; 128];
+        let n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
+        let response = String::from_utf8_lossy(&buf[..n]);
+        if response.contains("200") || response.contains("204") || response.contains("202") {
+            Ok(())
+        } else {
+            Err(format!("UDS server responded: {}", response.lines().next().unwrap_or("empty")))
+        }
+    }).await;
+
+    match result {
+        Ok(inner) => inner,
+        Err(_) => Err("UDS delivery timed out after 5s".to_string()),
+    }
 }
 
 /// Deliver a message to an agent.
 ///
 /// Tries Teams inbox delivery if a registry and agent key are provided.
 /// Attempts ACP prompt delivery if a registry is provided and agent is registered.
+/// Attempts HTTP-over-UDS delivery for custom binary agents (e.g., shoal-agent).
 /// Falls back to Zellij input injection if other delivery methods fail or are not available.
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&super::acp_registry::AcpRegistry>,
+    project_dir: &std::path::Path,
     agent_key: &str,
     zellij_tab_name: &str,
     from: &str,
@@ -80,6 +129,20 @@ pub async fn deliver_to_agent(
         }
     }
 
+    // Try HTTP-over-UDS delivery (for custom binary agents like shoal-agent)
+    let socket_path = project_dir.join(format!(".exo/agents/{}/notify.sock", agent_key));
+    if socket_path.exists() {
+        match deliver_via_uds(&socket_path, from, message, summary).await {
+            Ok(()) => {
+                info!(agent = %agent_key, socket = %socket_path.display(), "Delivered message via Unix socket");
+                return DeliveryResult::Uds;
+            }
+            Err(e) => {
+                warn!(agent = %agent_key, error = %e, "UDS delivery failed, falling back to Zellij");
+            }
+        }
+    }
+
     debug!(
         tab = %zellij_tab_name,
         chars = message.len(),
@@ -102,7 +165,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_no_registry_returns_zellij() {
-        let result = deliver_to_agent(None, None, "agent-1", "tab-1", "test", "hello", "summary").await;
+        let result = deliver_to_agent(None, None, std::path::Path::new("/tmp/nonexistent"), "agent-1", "tab-1", "test", "hello", "summary").await;
         assert_eq!(result, DeliveryResult::Zellij);
     }
 }

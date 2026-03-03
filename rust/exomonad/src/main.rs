@@ -106,6 +106,25 @@ enum Commands {
 }
 
 // ============================================================================
+// Per-Role WASM Resolution
+// ============================================================================
+
+/// Resolve the WASM file path for a given role.
+/// Convention: if `wasm-guest-{role}.wasm` exists, use it (role-specific WASM).
+/// Otherwise fall back to `wasm-guest-{default_name}.wasm` (shared WASM).
+fn resolve_wasm_path_for_role(wasm_dir: &std::path::Path, role: &str, default_name: &str) -> Option<PathBuf> {
+    let role_specific = wasm_dir.join(format!("wasm-guest-{role}.wasm"));
+    if role_specific.exists() {
+        return Some(role_specific);
+    }
+    let default_path = wasm_dir.join(format!("wasm-guest-{default_name}.wasm"));
+    if default_path.exists() {
+        return Some(default_path);
+    }
+    None
+}
+
+// ============================================================================
 // Per-Agent Plugin Cache
 // ============================================================================
 
@@ -850,6 +869,10 @@ fn generate_tl_tab_layout(
             format!("gemini --prompt-interactive '{}'", prompt.replace('\'', "'\\''"))
         }
         (AgentType::Gemini, None) => "gemini".to_string(),
+        (AgentType::Shoal, Some(prompt)) => {
+            format!("shoal-agent --prompt '{}'", prompt.replace('\'', "'\\''"))
+        }
+        (AgentType::Shoal, None) => "shoal-agent".to_string(),
     };
 
     let tl_command = match shell_command {
@@ -1036,26 +1059,14 @@ async fn main() -> Result<()> {
 
             let role_name = config.role.to_string();
             let wasm_dir = config.wasm_dir.clone();
+            let wasm_name = config.wasm_name.clone();
 
-            // Prefer named WASM module (contains all roles, role selection per-call).
-            // Fall back to per-role WASM for backwards compatibility.
-            let wasm_name = &config.wasm_name;
-            let named_path = wasm_dir.join(format!("wasm-guest-{wasm_name}.wasm"));
-            let wasm_path = if named_path.exists() {
-                info!(wasm_name, dir = %wasm_dir.display(), "Using {wasm_name} WASM (all roles in one module)");
-                named_path
-            } else {
-                let fallback = wasm_dir.join(format!("wasm-guest-{}.wasm", role_name));
-                info!(role = %role_name, dir = %wasm_dir.display(), "{wasm_name} WASM not found, falling back to per-role WASM");
-                fallback
-            };
-
-            if !wasm_path.exists() {
-                anyhow::bail!(
-                    "WASM file not found: {}\nRun `exomonad recompile` first to build it.",
-                    wasm_path.display()
-                );
-            }
+            // Resolve default WASM (for root TL role and as fallback)
+            let wasm_path = resolve_wasm_path_for_role(&wasm_dir, &role_name, &wasm_name)
+                .ok_or_else(|| anyhow::anyhow!(
+                    "WASM file not found in {}\nRun `exomonad recompile` first to build it.",
+                    wasm_dir.display()
+                ))?;
 
             let server_pid_path = project_dir.join(".exo/server.pid");
 
@@ -1244,7 +1255,9 @@ async fn main() -> Result<()> {
                 let servers = servers.clone();
                 let plugins = plugins.clone();
                 let registry = rt_registry.clone();
-                let wasm_path_for_handler = wasm_path.clone();
+                let wasm_path_default = wasm_path.clone();
+                let wasm_dir_for_handler = wasm_dir.clone();
+                let wasm_name_for_handler = wasm_name.clone();
                 let base_state = base_state.clone();
                 let wb = worktree_base.clone();
                 move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
@@ -1253,10 +1266,17 @@ async fn main() -> Result<()> {
                     let servers = servers.clone();
                     let plugins = plugins.clone();
                     let registry = registry.clone();
-                    let wasm_path_for_handler = wasm_path_for_handler.clone();
+                    let wasm_path_default = wasm_path_default.clone();
+                    let wasm_dir_for_handler = wasm_dir_for_handler.clone();
+                    let wasm_name_for_handler = wasm_name_for_handler.clone();
                     let base_state = base_state.clone();
                     let wb = wb.clone();
                     async move {
+                        // Resolve WASM path for this role (role-specific > default)
+                        let wasm_path_for_handler = resolve_wasm_path_for_role(
+                            &wasm_dir_for_handler, &role, &wasm_name_for_handler
+                        ).unwrap_or_else(|| wasm_path_default.clone());
+
                         // Resolve agent identity
                         let agent_name = exomonad_core::AgentName::from(name.as_str());
 
