@@ -24,7 +24,7 @@ use serial_test::serial;
 
 fn wasm_binary_bytes() -> Vec<u8> {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = manifest.join("../../.exo/wasm/wasm-guest-unified.wasm");
+    let path = manifest.join("../../.exo/wasm/wasm-guest-devswarm.wasm");
     assert!(
         path.exists(),
         "WASM binary not found at {path:?}. Build with `just wasm-all`."

@@ -14,7 +14,7 @@ This document details the configuration files, filesystem paths, and loading mec
 *   **Loaded By:** `rust/exomonad/src/config.rs`
 *   **Schema:**
     ```toml
-    # Role for hook/serve behavior (unified WASM handles all roles)
+    # Role for hook/serve behavior (devswarm WASM handles all roles)
     role = "dev" | "tl" | "pm"
 
     # Base project directory for git operations (default: ".")
@@ -79,7 +79,7 @@ Located in the user's home directory.
 
 *   `secrets`: Global secrets file.
 *   `wasm/`: Compiled WASM guest plugin.
-    *   `wasm-guest-unified.wasm`
+    *   `wasm-guest-devswarm.wasm`
 *   `logs/`: Log files.
     *   `sidecar-YYYY-MM-DD...log`
 

@@ -38,24 +38,24 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 ### Directory Structure
 
 ```
-.exo/roles/unified/
+.exo/roles/devswarm/
 ├── AllRoles.hs     # Role registry: Map Text SomeRoleConfig
 ├── TLRole.hs       # TL role config (spawn, PR, merge, popup, notify_parent)
 ├── DevRole.hs      # Dev role config (PR, notify_parent + permission cascade)
 ├── WorkerRole.hs   # Worker role config (notify_parent only, allow-all hooks)
 ├── Main.hs         # FFI exports that read role from input JSON
-└── unified.cabal   # Package definition
+└── devswarm.cabal  # Package definition
 ```
 
 Shared code across roles lives in `.exo/lib/` (e.g., `HttpDevHooks.hs`).
 
 ### How It Works
 
-1. Role configs live in `.exo/roles/unified/` — one module per role (`TLRole.hs`, `DevRole.hs`, `WorkerRole.hs`)
+1. Role configs live in `.exo/roles/devswarm/` — one module per role (`TLRole.hs`, `DevRole.hs`, `WorkerRole.hs`)
 2. `AllRoles.hs` registers all roles in a `Map Text SomeRoleConfig`
-3. `cabal.project.wasm` lists `.exo/roles/unified` as a package
-4. `just wasm-all` (or `exomonad recompile --role unified`) builds via nix + wasm32-wasi-cabal
-5. Output: `.exo/wasm/wasm-guest-unified.wasm` — loaded by Rust at runtime
+3. `cabal.project.wasm` lists `.exo/roles/devswarm` as a package
+4. `just wasm-all` (or `exomonad recompile --role devswarm`) builds via nix + wasm32-wasi-cabal
+5. Output: `.exo/wasm/wasm-guest-devswarm.wasm` — loaded by Rust at runtime
 6. In serve mode, hot reload checks mtime per tool call
 
 Key types:
@@ -68,7 +68,7 @@ Key types:
 Each role is a `RoleConfig` selecting from pre-built tool records:
 
 ```haskell
--- .exo/roles/unified/TLRole.hs
+-- .exo/roles/devswarm/TLRole.hs
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
     popups :: PopupTools mode,

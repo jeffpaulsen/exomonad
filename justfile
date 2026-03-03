@@ -61,7 +61,7 @@ wasm role="tl":
 
 # Build unified WASM plugin (contains all roles)
 wasm-all:
-    @just wasm unified
+    @just wasm devswarm
     @echo ">>> Installed to .exo/wasm/:"
     @ls -lh .exo/wasm/wasm-guest-*.wasm
 
@@ -102,7 +102,7 @@ _install profile:
     mkdir -p ~/.exo/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp "rust/exomonad-plugin/target/wasm32-wasip1/${TARGET_DIR}/exomonad-plugin.wasm" ~/.config/zellij/plugins/
-    cp .exo/wasm/wasm-guest-unified.wasm ~/.exo/wasm/
+    cp .exo/wasm/wasm-guest-devswarm.wasm ~/.exo/wasm/
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then
@@ -115,7 +115,7 @@ _install profile:
     echo "Installed:"
     ls -lh ~/.cargo/bin/exomonad
     ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
-    ls -lh .exo/wasm/wasm-guest-unified.wasm
+    ls -lh .exo/wasm/wasm-guest-devswarm.wasm
 
 # Install everything: Rust binaries + WASM plugins (release build)
 install-all: (_install "release")

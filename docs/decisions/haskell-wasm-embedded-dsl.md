@@ -60,10 +60,10 @@ Tool call arrives (HTTP)
 
 ### Build Pipeline
 
-1. Role configs in `.exo/roles/unified/` define tool composition per role
+1. Role configs in `.exo/roles/devswarm/` define tool composition per role
 2. `AllRoles.hs` registers all roles; `Main.hs` provides FFI exports
 3. `just wasm-all` builds via `nix develop .#wasm -c wasm32-wasi-cabal build`
-4. Compiled WASM copied to `.exo/wasm/wasm-guest-unified.wasm`
+4. Compiled WASM copied to `.exo/wasm/wasm-guest-devswarm.wasm`
 5. `exomonad serve` loads WASM at runtime (hot reload via mtime check)
 
 ### Effect System
