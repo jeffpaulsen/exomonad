@@ -6,14 +6,14 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
+WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin UDS client that forwards hook events to the running server — it does NOT load WASM itself.
 
 ```
-# Hook mode (thin HTTP client → server)
-Claude Code → exomonad hook → HTTP POST localhost:{port}/hook → server WASM → HookEnvelope → stdout
+# Hook mode (thin UDS client → server)
+Claude Code → exomonad hook → UDS (.exo/server.sock) → server WASM → HookEnvelope → stdout
 
-# HTTP mode (multi-agent, devswarm WASM)
-N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (handles all roles) → effects → I/O
+# MCP mode (multi-agent, devswarm WASM)
+N agents → exomonad serve → UDS (.exo/server.sock) → Unified WASM (handles all roles) → effects → I/O
 ```
 
 **Fail-open:** If the server is unreachable when a hook fires, `exomonad hook` prints `{"continue":true}` and exits 0. This prevents blocking the human's session.
@@ -22,7 +22,8 @@ N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
-exomonad serve [--port PORT]      # TCP MCP server (multi-agent, hot reload)
+exomonad mcp-stdio                # Stdio MCP server (single agent)
+exomonad serve                    # UDS MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
 ```
@@ -30,7 +31,7 @@ exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL t
 ### Init Command
 
 `exomonad init` creates a two-tab Zellij session:
-- **Server tab**: Runs `exomonad serve --port <port>` (stays open on exit)
+- **Server tab**: Runs `exomonad serve` (stays open on exit, binds .exo/server.sock)
 - **TL tab**: Runs `nix develop` for the dev environment (focused by default)
 
 Claude MCP is auto-registered during init. For Gemini, register manually (`gemini mcp add ...`).
@@ -59,17 +60,20 @@ To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
 
 ## MCP Server
 
-The MCP server provides tools via HTTP (rmcp).
+The MCP server provides tools via UDS or stdio.
 
 ### Configuration
 
-Use CLI-native config commands:
-```bash
-# Claude Code
-claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
-
-# Gemini CLI (HTTP mode only)
-gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
+Register manually in `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "exomonad": {
+      "command": "exomonad",
+      "args": ["mcp-stdio", "--role", "tl", "--agent-id", "root"]
+    }
+  }
+}
 ```
 
 ### Available Tools
@@ -83,6 +87,14 @@ gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mc
 | `merge_pr` | tl | Merge child PR (gh merge + git fetch) |
 | `popup` | tl | Interactive UI in Zellij |
 | `notify_parent` | all | Signal completion to parent |
+
+### Debugging
+
+You can probe the UDS server using `curl`:
+```bash
+# Check if server is alive and responding to hooks
+curl --unix-socket .exo/server.sock http://localhost/hook?event=PreToolUse
+```
 
 
 ## Environment Variables
@@ -146,9 +158,9 @@ echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","t
 ```
 Claude Code hook JSON (stdin)
          ↓
-    exomonad hook pre-tool-use (thin HTTP client)
+    exomonad hook pre-tool-use (thin UDS client)
          ↓
-    HTTP POST localhost:{port}/hook?event=pre-tool-use&runtime=claude
+    UDS POST .exo/server.sock /hook?event=pre-tool-use&runtime=claude
          ↓
     Server: parse HookInput from body
          ↓

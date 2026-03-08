@@ -52,7 +52,7 @@ Human in Zellij session
 Each subtree agent (`spawn_subtree`):
 - Runs in isolated git worktree at `.exo/worktrees/{slug}/`
 - Branch naming: `{parent_branch}.{slug}` (dot separator for hierarchy)
-- Gets `.mcp.json` with `{"type": "http", "url": "..."}` pointing to per-agent endpoint
+- Gets `.mcp.json` with `{"type": "stdio", "command": "exomonad", "args": ["mcp-stdio", "--role", "tl", "--agent-id", "..."]}`
 - Claude-only, gets TL role (can spawn workers, depth-capped at 2)
 - Session ID = birth-branch (immutable, deterministic). Root TL = "root".
 - PRs target parent branch, not main — merged via recursive fold
@@ -133,8 +133,8 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 
 ### Running
 ```bash
-# MCP server (HTTP)
-exomonad serve
+# MCP server (stdio)
+exomonad mcp-stdio --role tl --agent-id root
 
 # Handle Claude Code hook
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
@@ -152,20 +152,11 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 ### Agent Identity
 
-In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which WASM tool set (lazy McpServer per role). Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction.
-
-**Per-agent PluginManager cache:** The server maintains a `HashMap<AgentName, Arc<PluginManager>>`. On first request from an agent, a new PluginManager is created with the agent's `EffectContext` and cached. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
-
-**Route layout (single pattern):**
-- `/agents/{role}/{name}/mcp` — unified route for all agents
-  - Root TL: `/agents/tl/root/mcp`
-  - Spawned Claude subtree: `/agents/tl/{name}/mcp`
-  - Spawned Gemini leaf: `/agents/dev/{name}/mcp`
-  - Spawned Gemini worker: `/agents/worker/{name}/mcp`
+In `mcp-stdio` mode, the agent's identity is passed via command-line flags: `--role {role} --agent-id {name}`. Role determines which WASM tool set. Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
 
 Roles are defined in Haskell WASM (`AllRoles.hs`). Adding a role is a Haskell-only change — Rust uses a lazy cache that creates an `McpServer` per role on first request.
 
-At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
+At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` writes per-agent MCP config with the agent's identity flags. Identity is unforgeable and visible in logs.
 
 ## MCP Tools
 
@@ -234,13 +225,16 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 
 ## Configuration
 
-`exomonad init` auto-registers the Claude MCP server. For Gemini or custom setups, register manually:
-```bash
-# Gemini CLI (HTTP mode only)
-gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
-
-# Claude Code (manual, e.g. custom port)
-claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
+`exomonad init` auto-registers the Claude MCP server. For Gemini or custom setups, register manually in `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "exomonad": {
+      "command": "exomonad",
+      "args": ["mcp-stdio", "--role", "tl", "--agent-id", "root"]
+    }
+  }
+}
 ```
 
 `config.toml` is auto-created by `exomonad init` — all fields are optional.
