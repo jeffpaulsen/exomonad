@@ -11,7 +11,8 @@ import HttpDevHooks (httpDevHooks)
 
 data Tools mode = Tools
   { pr :: FilePRTools mode,
-    notifyParent :: mode :- NotifyParent
+    notifyParent :: mode :- NotifyParent,
+    sendMessage :: mode :- SendMessage
   }
   deriving (Generic)
 
@@ -22,7 +23,8 @@ config =
       tools =
         Tools
           { pr = filePRTools,
-            notifyParent = mkHandler @NotifyParent
+            notifyParent = mkHandler @NotifyParent,
+            sendMessage = mkHandler @SendMessage
           },
       hooks = httpDevHooks
     }

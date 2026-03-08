@@ -4,6 +4,7 @@
 module ExoMonad.Effects.Events
   ( EventsNotifyEvent,
     EventsNotifyParent,
+    EventsSendMessage,
 
     -- * Proto types
     module Effects.Events,
@@ -28,3 +29,11 @@ instance Effect EventsNotifyParent where
   type Input EventsNotifyParent = NotifyParentRequest
   type Output EventsNotifyParent = NotifyParentResponse
   effectId = "events.notify_parent"
+
+-- | Send message effect
+data EventsSendMessage
+
+instance Effect EventsSendMessage where
+  type Input EventsSendMessage = SendMessageRequest
+  type Output EventsSendMessage = SendMessageResponse
+  effectId = "events.send_message"

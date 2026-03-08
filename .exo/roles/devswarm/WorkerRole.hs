@@ -11,7 +11,8 @@ import ExoMonad.Guest.Types (allowResponse, allowStopResponse, postToolUseRespon
 import ExoMonad.Types (HookConfig (..), defaultSessionStartHook)
 
 data Tools mode = Tools
-  { notifyParent :: mode :- NotifyParent
+  { notifyParent :: mode :- NotifyParent,
+    sendMessage :: mode :- SendMessage
   }
   deriving (Generic)
 
@@ -21,7 +22,8 @@ config =
     { roleName = "worker",
       tools =
         Tools
-          { notifyParent = mkHandler @NotifyParent
+          { notifyParent = mkHandler @NotifyParent,
+            sendMessage = mkHandler @SendMessage
           },
       hooks =
         HookConfig

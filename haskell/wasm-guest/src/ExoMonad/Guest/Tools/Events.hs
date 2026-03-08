@@ -5,6 +5,7 @@
 
 module ExoMonad.Guest.Tools.Events
   ( NotifyParent (..),
+    SendMessage (..),
   )
 where
 
@@ -138,3 +139,52 @@ composeNotifyMessage args =
         Just tasks -> T.concat ["\n  - " <> trWhat t <> " (verified: " <> trHow t <> ")" | t <- tasks]
         Nothing -> ""
    in base <> prSuffix <> taskLines
+
+-- | Send message tool
+data SendMessage = SendMessage
+
+data SendMessageArgs = SendMessageArgs
+  { smRecipient :: Text,
+    smContent :: Text,
+    smSummary :: Maybe Text
+  }
+  deriving (Generic, Show)
+
+instance FromJSON SendMessageArgs where
+  parseJSON = withObject "SendMessageArgs" $ \v ->
+    SendMessageArgs
+      <$> v .: "recipient"
+      <*> v .: "content"
+      <*> v .:? "summary"
+
+instance ToJSON SendMessageArgs where
+  toJSON args =
+    object
+      [ "recipient" .= smRecipient args,
+        "content" .= smContent args,
+        "summary" .= smSummary args
+      ]
+
+instance MCPTool SendMessage where
+  type ToolArgs SendMessage = SendMessageArgs
+  toolName = "send_message"
+  toolDescription = "for sending messages to other exomonad-spawned agents (workers, leaves, subtrees) not Claude Code native teammates"
+  toolSchema =
+    genericToolSchemaWith @SendMessageArgs
+      [ ("recipient", "The name of the agent to receive the message"),
+        ("content", "The content of the message"),
+        ("summary", "An optional summary of the message")
+      ]
+  toolHandlerEff args = do
+    result <- suspendEffect @ProtoEvents.EventsSendMessage
+                (ProtoEvents.SendMessageRequest
+                  { ProtoEvents.sendMessageRequestRecipient = TL.fromStrict (smRecipient args),
+                    ProtoEvents.sendMessageRequestContent = TL.fromStrict (smContent args),
+                    ProtoEvents.sendMessageRequestSummary = maybe "" TL.fromStrict (smSummary args)
+                  })
+    case result of
+      Left err -> pure $ errorResult (T.pack (show err))
+      Right resp -> pure $ successResult $ object
+        [ "success" .= ProtoEvents.sendMessageResponseSuccess resp,
+          "delivery_method" .= ProtoEvents.sendMessageResponseDeliveryMethod resp
+        ]

@@ -17,7 +17,8 @@ data Tools mode = Tools
     popups :: PopupTools mode,
     pr :: FilePRTools mode,
     mergePr :: mode :- MergePR,
-    notifyParent :: mode :- NotifyParent
+    notifyParent :: mode :- NotifyParent,
+    sendMessage :: mode :- SendMessage
   }
   deriving (Generic)
 
@@ -31,7 +32,8 @@ config =
             popups = popupTools,
             pr = filePRTools,
             mergePr = mkHandler @MergePR,
-            notifyParent = mkHandler @NotifyParent
+            notifyParent = mkHandler @NotifyParent,
+            sendMessage = mkHandler @SendMessage
           },
       hooks =
         HookConfig
