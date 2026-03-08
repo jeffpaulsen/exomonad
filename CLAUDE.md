@@ -76,10 +76,10 @@ if !status.success() {
 ### Session Entry Point
 
 **`exomonad init` is THE entry point for development sessions.** It creates a Zellij session with:
-- **Server tab**: Runs `exomonad serve --port 7432` (the HTTP MCP server, required for all tool calls)
+- **Server tab**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
 - **TL tab**: Runs `nix develop` (where you launch `claude` or work directly)
 
-The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.claude/settings.local.json` with hooks (including `SessionStart` which registers the Claude session UUID for `--fork-session` context inheritance in spawned subtrees).
+The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.mcp.json` (MCP server config) and `.claude/settings.local.json` (hooks and session settings).
 
 ```bash
 cd exomonad/                  # Run from the project root
@@ -89,13 +89,12 @@ claude                        # MCP tools available immediately
 ```
 
 Use `--recreate` to tear down and rebuild the session (e.g., after binary updates).
-Use `--port` to override the default port (7432).
 
 ### MCP Registration
 
-`exomonad init` automatically registers the Claude MCP server. For Gemini, register manually:
+`exomonad init` automatically registers the Claude MCP server. For Gemini, register manually via stdio:
 ```bash
-gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
+gemini mcp add exomonad --command "exomonad mcp-stdio"
 ```
 
 ### Zero-Config for Consuming Repos
@@ -110,7 +109,7 @@ exomonad init
 # → Bootstraps .exo/config.toml (empty, all defaults)
 # → Auto-detects role from .exo/roles/
 # → Builds WASM if missing
-# → Starts server, registers Claude MCP
+# → Starts server, registers Claude MCP via .mcp.json
 # → Creates Zellij session
 ```
 
@@ -129,7 +128,7 @@ just wasm-all
 # Rust sidecar only
 cargo build -p exomonad
 
-# Hot reload workflow (HTTP serve mode)
+# Hot reload workflow
 exomonad serve                    # Start server
 # ... edit .exo/roles/devswarm/TLRole.hs ...
 exomonad recompile --role devswarm # Rebuild WASM via nix, copy to .exo/wasm/
@@ -271,7 +270,7 @@ Human in Zellij session
 **Rust = Runtime**
 - Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, Zellij)
 - Owns the process lifecycle
-- MCP server (HTTP, started by `exomonad init`)
+- MCP server (UDS, started by `exomonad init`)
 
 **Worktrees + Zellij = Isolation/Multiplexing**
 - Git worktrees for code isolation (no Docker containers)
@@ -282,7 +281,7 @@ Human in Zellij session
 
 **MCP Tool Call:**
 ```
-Claude Code → HTTP request → exomonad serve → WASM handle_mcp_call
+Claude Code → stdio → exomonad mcp-stdio → UDS → exomonad serve → WASM handle_mcp_call
 → Haskell dispatches to tool handler → yields effects
 → Rust executes effects via host functions → result returned
 ```
@@ -290,7 +289,7 @@ Claude Code → HTTP request → exomonad serve → WASM handle_mcp_call
 **Hook Call:**
 ```
 Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
-→ HTTP POST to server → WASM handle_pre_tool_use
+→ UDS request to server → WASM handle_pre_tool_use
 → Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
 → Claude Code proceeds or blocks
 ```
