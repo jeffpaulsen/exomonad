@@ -142,9 +142,9 @@ checkUncommittedWork branch = do
         _ -> False
 
   if hasUncommitted
-    then pure $ Just $ "You have uncommitted changes on " <> branch <> " but no PR filed. Commit, file a PR, and call notify_parent before stopping."
+    then pure $ Just $ "You have uncommitted changes on " <> branch <> " but no PR filed. Commit and file a PR before stopping."
     else if hasUnpushed
-      then pure $ Just $ "Commits on " <> branch <> " aren't in a PR yet. File a PR and call notify_parent before stopping."
+      then pure $ Just $ "Commits on " <> branch <> " aren't in a PR yet. File a PR before stopping."
       else pure Nothing
 
 -- ============================================================================
