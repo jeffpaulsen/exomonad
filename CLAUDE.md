@@ -90,6 +90,12 @@ claude                        # MCP tools available immediately
 
 Use `--recreate` to tear down and rebuild the session (e.g., after binary updates).
 
+**Server management:**
+```bash
+exomonad reload                  # Clear WASM plugin cache (next call loads fresh from disk)
+exomonad shutdown                # Gracefully shut down the running server
+```
+
 ### MCP Registration
 
 `exomonad init` automatically registers the Claude MCP server. For Gemini, register manually via stdio:
@@ -133,6 +139,7 @@ cargo build -p exomonad
 
 # Hot reload: server checks WASM mtime per tool call, so after recompile
 # the next MCP call picks up the new WASM automatically.
+# For immediate reload: `exomonad reload` clears the plugin cache explicitly.
 ```
 
 **What `just install-all-dev` does:**

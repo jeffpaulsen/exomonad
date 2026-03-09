@@ -110,6 +110,12 @@ enum Commands {
         #[arg(long)]
         cancel: bool,
     },
+
+    /// Reload WASM plugins (clears plugin cache, next call loads fresh from disk)
+    Reload,
+
+    /// Gracefully shut down the running server
+    Shutdown,
 }
 
 // ============================================================================
@@ -1487,6 +1493,40 @@ async fn main() -> Result<()> {
                 default_role: config.role,
             };
 
+            // Shutdown signal for graceful shutdown via /shutdown endpoint
+            let shutdown_signal = Arc::new(tokio::sync::Notify::new());
+
+            // Reload handler: clears plugin cache, next call loads fresh WASM from disk
+            let reload_handler = {
+                let plugins = plugins.clone();
+                move || {
+                    let plugins = plugins.clone();
+                    async move {
+                        let mut cache = plugins.write().await;
+                        let evicted = cache.len();
+                        cache.clear();
+                        info!(plugins_evicted = evicted, "Plugin cache cleared (reload)");
+                        axum::Json(serde_json::json!({
+                            "status": "ok",
+                            "plugins_evicted": evicted,
+                        }))
+                    }
+                }
+            };
+
+            // Shutdown handler: ack then signal graceful shutdown
+            let shutdown_handler = {
+                let signal = shutdown_signal.clone();
+                move || {
+                    let signal = signal.clone();
+                    async move {
+                        info!("Shutdown requested via /shutdown endpoint");
+                        signal.notify_one();
+                        axum::Json(serde_json::json!({"status": "ok"}))
+                    }
+                }
+            };
+
             let cors = CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods(Any)
@@ -1507,6 +1547,8 @@ async fn main() -> Result<()> {
                     axum::routing::post(call_tool_handler),
                 )
                 .route("/events", axum::routing::post(events_handler))
+                .route("/reload", axum::routing::post(reload_handler))
+                .route("/shutdown", axum::routing::post(shutdown_handler))
                 .layer(cors)
                 .layer(TraceLayer::new_for_http());
 
@@ -1560,7 +1602,8 @@ async fn main() -> Result<()> {
             let socket_path_for_cleanup = socket_path.clone();
             let server_pid_for_cleanup = server_pid_path.clone();
 
-            // Run with graceful shutdown on SIGINT or SIGTERM
+            // Run with graceful shutdown on SIGINT, SIGTERM, or /shutdown endpoint
+            let shutdown_signal_for_server = shutdown_signal.clone();
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     let ctrl_c = tokio::signal::ctrl_c();
@@ -1577,6 +1620,7 @@ async fn main() -> Result<()> {
                     tokio::select! {
                         _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
                         _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
+                        _ = shutdown_signal_for_server.notified() => info!("Received /shutdown request, initiating graceful shutdown"),
                     }
                 })
                 .await?;
@@ -1728,6 +1772,33 @@ async fn main() -> Result<()> {
                 .context("Failed to write to socket")?;
 
             info!("Sent reply to control socket");
+        }
+
+        Commands::Reload => {
+            let socket = uds_client::find_server_socket()
+                .context("Cannot find server socket. Is exomonad serve running?")?;
+            let client = uds_client::ServerClient::new(socket);
+            let resp: serde_json::Value = client
+                .post_json("/reload", &serde_json::json!({}))
+                .await
+                .context("Reload request failed")?;
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        }
+
+        Commands::Shutdown => {
+            let socket = uds_client::find_server_socket()
+                .context("Cannot find server socket. Is exomonad serve running?")?;
+            let client = uds_client::ServerClient::new(socket);
+            match client
+                .post_json::<serde_json::Value, serde_json::Value>("/shutdown", &serde_json::json!({}))
+                .await
+            {
+                Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp)?),
+                Err(_) => {
+                    // Server may close connection before sending response — that's expected
+                    println!("Shutdown signal sent");
+                }
+            }
         }
     }
 

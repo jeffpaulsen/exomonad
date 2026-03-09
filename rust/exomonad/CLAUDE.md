@@ -26,6 +26,8 @@ exomonad mcp-stdio                # Stdio MCP server (single agent)
 exomonad serve                    # UDS MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
+exomonad reload                   # Clear WASM plugin cache (hot reload)
+exomonad shutdown                 # Gracefully shut down the running server
 ```
 
 ### Init Command
@@ -169,7 +171,9 @@ echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","t
 | `/hook` | POST | Hook events (pre-tool-use, session-start, etc.) |
 | `/agents/{role}/{name}/tools` | GET | List tools for an agent |
 | `/agents/{role}/{name}/tools/call` | POST | Call a tool (body: `{name, arguments}`) |
-| `/events` | GET | SSE event stream |
+| `/events` | POST | Event notifications |
+| `/reload` | POST | Clear WASM plugin cache (next call loads fresh from disk) |
+| `/shutdown` | POST | Graceful server shutdown |
 
 ## Data Flow
 
