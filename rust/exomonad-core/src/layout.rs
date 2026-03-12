@@ -6,15 +6,10 @@
 use askama::Template;
 use std::path::Path;
 
-/// Resolve the exomonad-plugin WASM path to an absolute `file:` URL.
-///
-/// Uses `EXOMONAD_PLUGIN_PATH` env var or the default install location.
-/// Returns the expanded absolute path (e.g., `file:/home/user/.config/zellij/plugins/exomonad-plugin.wasm`).
-/// Both the KDL layout and the popup service must use this same path so Zellij
-/// routes pipe messages to the pre-loaded instance instead of spawning a second one.
-pub fn resolve_plugin_path() -> Option<String> {
-    let raw = std::env::var("EXOMONAD_PLUGIN_PATH")
-        .unwrap_or_else(|_| "~/.config/zellij/plugins/exomonad-plugin.wasm".to_string());
+/// Expand a `~/...` path to an absolute path, checking that it exists.
+/// Returns `Some("file:/absolute/path")` if the file exists, `None` otherwise.
+fn resolve_wasm_path(env_var: &str, default: &str) -> Option<String> {
+    let raw = std::env::var(env_var).unwrap_or_else(|_| default.to_string());
 
     let expanded = if let Some(rest) = raw.strip_prefix("~/") {
         dirs::home_dir()
@@ -29,6 +24,29 @@ pub fn resolve_plugin_path() -> Option<String> {
     } else {
         None
     }
+}
+
+/// Resolve the exomonad-plugin WASM path to an absolute `file:` URL.
+///
+/// Uses `EXOMONAD_PLUGIN_PATH` env var or the default install location.
+/// Both the KDL layout and the popup service must use this same path so Zellij
+/// routes pipe messages to the pre-loaded instance instead of spawning a second one.
+pub fn resolve_plugin_path() -> Option<String> {
+    resolve_wasm_path(
+        "EXOMONAD_PLUGIN_PATH",
+        "~/.config/zellij/plugins/exomonad-plugin.wasm",
+    )
+}
+
+/// Resolve the zjstatus WASM path to an absolute `file:` URL.
+///
+/// Uses `ZJSTATUS_PATH` env var or the default install location.
+/// Returns `None` if the WASM doesn't exist — templates fall back to `zellij:status-bar`.
+pub fn resolve_zjstatus_path() -> Option<String> {
+    resolve_wasm_path(
+        "ZJSTATUS_PATH",
+        "~/.config/zellij/plugins/zjstatus.wasm",
+    )
 }
 
 /// Parameters for generating an agent tab.
@@ -69,6 +87,7 @@ struct AgentTab {
 struct SubagentLayout {
     agent_tab: String,
     plugin_path: Option<String>,
+    zjstatus_path: Option<String>,
 }
 
 /// Template for the main layout with multiple agent tabs.
@@ -77,6 +96,7 @@ struct SubagentLayout {
 struct MainLayout {
     agent_tabs: Vec<String>,
     plugin_path: Option<String>,
+    zjstatus_path: Option<String>,
 }
 
 /// Generate a complete layout for a single agent tab with zjstatus.
@@ -98,6 +118,7 @@ pub fn generate_agent_layout(params: &AgentTabParams) -> Result<String, askama::
     SubagentLayout {
         agent_tab: tab,
         plugin_path: resolve_plugin_path(),
+        zjstatus_path: resolve_zjstatus_path(),
     }
     .render()
 }
@@ -125,6 +146,7 @@ pub fn generate_main_layout(tabs: Vec<AgentTabParams>) -> Result<String, askama:
     MainLayout {
         agent_tabs: rendered_tabs?,
         plugin_path: resolve_plugin_path(),
+        zjstatus_path: resolve_zjstatus_path(),
     }
     .render()
 }
@@ -150,7 +172,8 @@ mod tests {
         // Verify key components
         assert!(layout.contains("tab name=\"🤖 473-test\""));
         assert!(layout.contains("focus=true"));
-        assert!(layout.contains("zjstatus.wasm"));
+        // Without zjstatus on disk, falls back to built-in status bar
+        assert!(layout.contains("zellij:status-bar") || layout.contains("zjstatus.wasm"));
         assert!(layout.contains("/bin/zsh"));
         assert!(layout.contains("claude --prompt 'test'"));
         assert!(layout.contains("/tmp/test"));
@@ -183,7 +206,7 @@ mod tests {
 
         assert!(layout.contains("tab name=\"Tab1\""));
         assert!(layout.contains("tab name=\"Tab2\""));
-        assert!(layout.contains("zjstatus.wasm"));
+        assert!(layout.contains("zellij:status-bar") || layout.contains("zjstatus.wasm"));
     }
 
     // === Edge case tests ===
@@ -310,7 +333,7 @@ mod tests {
     // === Structure validation tests ===
 
     #[test]
-    fn test_layout_has_zjstatus() {
+    fn test_layout_has_status_bar() {
         let params = AgentTabParams {
             tab_name: "Test",
             pane_name: "Agent",
@@ -322,9 +345,10 @@ mod tests {
         };
 
         let layout = generate_agent_layout(&params).unwrap();
+        // Uses zjstatus if the WASM exists on disk, otherwise falls back to built-in
         assert!(
-            layout.contains("zjstatus.wasm"),
-            "Layout should include zjstatus plugin"
+            layout.contains("zjstatus.wasm") || layout.contains("zellij:status-bar"),
+            "Layout should include a status bar plugin"
         );
     }
 
@@ -386,8 +410,8 @@ mod tests {
         assert!(layout.contains("tab name=\"Tab2\""));
         assert!(layout.contains("tab name=\"Tab3\""));
 
-        // Should have zjstatus
-        assert!(layout.contains("zjstatus.wasm"));
+        // Should have a status bar
+        assert!(layout.contains("zjstatus.wasm") || layout.contains("zellij:status-bar"));
     }
 
     #[test]
@@ -433,7 +457,7 @@ mod tests {
     fn test_empty_tabs_list() {
         let tabs: Vec<AgentTabParams> = vec![];
         let layout = generate_main_layout(tabs).unwrap();
-        // Should still produce valid KDL with zjstatus
-        assert!(layout.contains("zjstatus.wasm"));
+        // Should still produce valid KDL with a status bar
+        assert!(layout.contains("zjstatus.wasm") || layout.contains("zellij:status-bar"));
     }
 }

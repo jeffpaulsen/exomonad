@@ -1,0 +1,16 @@
+# Whitelist approach: exclude everything, then include what the build needs.
+*
+
+# Workspace root
+!Cargo.toml
+!Cargo.lock
+
+# Rust workspace members
+!rust/
+rust/**/target/
+
+# Vendored Rust dependencies (acp-rust-sdk)
+!vendor/
+
+# exile-test (bootstrap script + pre-built WASM artifacts)
+!try-exomonad/

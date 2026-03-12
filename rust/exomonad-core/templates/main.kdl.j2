@@ -5,7 +5,11 @@ layout {
         }
         children
         pane size=1 borderless=true {
+{% if let Some(_zj) = zjstatus_path %}
             {% include "includes/zjstatus.kdl.j2" %}
+{% else %}
+            plugin location="zellij:status-bar"
+{% endif %}
         }
 {% if let Some(path) = plugin_path %}
         floating_panes {

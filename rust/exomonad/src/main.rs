@@ -760,34 +760,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     // Create fresh session from layout
     info!(session = %session, "Creating session");
 
-    // 1. Start server tab
-    // Server tab runs the binary directly (no shell_command wrapper).
-    // shell_command (e.g. "nix develop") is only for the interactive TL tab.
-    // Wrapping the server in nix develop adds 15-30s startup on macOS,
-    // causing the health check to timeout.
-    let server_layout_path = generate_server_layout(None)?;
-
-    info!("Starting server...");
-    // Create zellij session with server layout in background (fork, don't attach).
-    // `-n` creates the session with the layout; spawning without waiting keeps it detached.
-    let mut child = std::process::Command::new("zellij")
-        .args(["-s", &session, "-n"])
-        .arg(&server_layout_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .context("Failed to start Zellij session with server layout")?;
-
-    // Give zellij a moment to create the session before we try to add tabs
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    // Reap the background process (zellij -n detaches into daemon, this child exits)
-    let _ = child.try_wait();
-
-    // 2. Poll for server socket
-    wait_for_server_socket(&cwd).await?;
-
-    // 2b. Write .mcp.json for Claude MCP (replaces `claude mcp add`)
+    // 1. Write .mcp.json BEFORE session starts (Claude Code reads it at startup)
     let mcp_json = serde_json::json!({
         "mcpServers": {
             "exomonad": {
@@ -803,44 +776,36 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     )?;
     info!("Wrote .mcp.json with stdio MCP config");
 
-    // 3. Start TL tab (only if one doesn't already exist)
-    let tab_output = std::process::Command::new("zellij")
-        .env("ZELLIJ_SESSION_NAME", &session)
-        .args(["action", "query-tab-names"])
-        .output()
-        .context("Failed to query Zellij tab names")?;
-    let tab_names = String::from_utf8_lossy(&tab_output.stdout);
-    let tl_tab_exists = tab_names.lines().any(|l| l.trim() == "TL");
-
-    if tl_tab_exists {
-        info!("TL tab already exists, skipping creation");
-    } else {
-        info!("Server healthy, starting TL tab...");
-    }
-
-    let tl_layout_path = generate_tl_tab_layout(
+    // 2. Generate combined layout with Server + TL tabs in one session.
+    // This avoids `zellij action new-tab` which can hang in containerized environments.
+    let layout_path = generate_init_layout(
         config.shell_command.as_deref(),
         config.root_agent_type,
         config.initial_prompt.as_deref(),
     )?;
 
-    if !tl_tab_exists {
-        let status = std::process::Command::new("zellij")
-            .env("ZELLIJ_SESSION_NAME", &session)
-            .args(["action", "new-tab", "--layout"])
-            .arg(&tl_layout_path)
-            .status()
-            .context("Failed to add TL tab to Zellij")?;
+    eprintln!("Starting session...");
+    // Create zellij session with combined layout in background.
+    // Null stdio causes zellij to run as daemon (no terminal to attach to).
+    let mut child = std::process::Command::new("zellij")
+        .args(["-s", &session, "-n"])
+        .arg(&layout_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to start Zellij session")?;
 
-        if !status.success() {
-            return Err(anyhow::anyhow!(
-                "Failed to add TL tab to Zellij session: {}",
-                status
-            ));
-        }
-    }
+    // Give zellij a moment to create the session
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Reap the background process (zellij daemon detaches, this child exits)
+    let _ = child.try_wait();
+
+    // 3. Poll for server socket
+    wait_for_server_socket(&cwd).await?;
 
     // 4. Attach (exec replaces process, releasing the binary for hot-swap)
+    // TL tab gets focus via layout focus=true attribute.
     info!(session = %session, "Attaching to session");
     let err = std::process::Command::new("zellij")
         .args(["attach", &session])
@@ -926,37 +891,11 @@ async fn wait_for_server_socket(project_dir: &std::path::Path) -> Result<()> {
     ))
 }
 
-/// Generate a Server-only Zellij layout.
-fn generate_server_layout(shell_command: Option<&str>) -> Result<std::path::PathBuf> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let cwd = std::env::current_dir()?;
-
-    let serve_command = match shell_command {
-        Some(sc) => format!("{} -c 'exomonad serve'", sc),
-        None => "exomonad serve".to_string(),
-    };
-
-    let params = exomonad_core::layout::AgentTabParams {
-        tab_name: "Server",
-        pane_name: "exomonad-serve",
-        command: &serve_command,
-        cwd: &cwd,
-        shell: &shell,
-        focus: false,
-        close_on_exit: false,
-    };
-
-    let layout = exomonad_core::layout::generate_agent_layout(&params)
-        .context("Failed to generate Server layout")?;
-
-    let layout_path = std::env::temp_dir().join("exomonad-server-layout.kdl");
-    std::fs::write(&layout_path, layout)?;
-
-    Ok(layout_path)
-}
-
-/// Generate a TL-only Zellij layout for a new tab.
-fn generate_tl_tab_layout(
+/// Generate a combined Zellij layout with Server + TL tabs for `exomonad init`.
+///
+/// Both tabs are created in a single layout, avoiding `zellij action new-tab`
+/// which can hang in containerized environments where the session runs headless.
+fn generate_init_layout(
     shell_command: Option<&str>,
     root_agent_type: AgentType,
     initial_prompt: Option<&str>,
@@ -964,8 +903,16 @@ fn generate_tl_tab_layout(
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
+    // Server tab runs the binary directly (no shell_command wrapper).
+    // shell_command (e.g. "nix develop") is only for the interactive TL tab.
+    // Wrapping the server in nix develop adds 15-30s startup on macOS.
+    let serve_command = "exomonad serve".to_string();
+
     let base_command = match (root_agent_type, initial_prompt) {
-        (AgentType::Claude, _) => "claude --dangerously-skip-permissions --resume".to_string(),
+        // Shell fallback: if claude exits (crash or /exit), show a message and
+        // drop to an interactive shell so the user can debug or restart.
+        // Ink (Claude's TUI) clears the screen on exit, so without this the pane is blank.
+        (AgentType::Claude, _) => "claude --dangerously-skip-permissions -c || claude --dangerously-skip-permissions; echo; echo [Claude Code exited]; exec bash -l".to_string(),
         (AgentType::Gemini, Some(prompt)) => {
             format!(
                 "gemini --prompt-interactive '{}'",
@@ -984,20 +931,31 @@ fn generate_tl_tab_layout(
         None => base_command,
     };
 
-    let params = exomonad_core::layout::AgentTabParams {
-        tab_name: "TL",
-        pane_name: "Main",
-        command: &tl_command,
-        cwd: &cwd,
-        shell: &shell,
-        focus: true,
-        close_on_exit: false,
-    };
+    let tabs = vec![
+        exomonad_core::layout::AgentTabParams {
+            tab_name: "Server",
+            pane_name: "exomonad-serve",
+            command: &serve_command,
+            cwd: &cwd,
+            shell: &shell,
+            focus: false,
+            close_on_exit: false,
+        },
+        exomonad_core::layout::AgentTabParams {
+            tab_name: "TL",
+            pane_name: "Main",
+            command: &tl_command,
+            cwd: &cwd,
+            shell: &shell,
+            focus: true,
+            close_on_exit: false,
+        },
+    ];
 
-    let layout = exomonad_core::layout::generate_agent_layout(&params)
-        .context("Failed to generate TL tab layout")?;
+    let layout = exomonad_core::layout::generate_main_layout(tabs)
+        .context("Failed to generate init layout")?;
 
-    let layout_path = std::env::temp_dir().join("exomonad-tl-tab-layout.kdl");
+    let layout_path = std::env::temp_dir().join("exomonad-init-layout.kdl");
     std::fs::write(&layout_path, layout)?;
 
     Ok(layout_path)
