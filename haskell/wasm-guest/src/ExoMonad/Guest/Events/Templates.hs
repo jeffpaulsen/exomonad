@@ -12,6 +12,8 @@
 module ExoMonad.Guest.Events.Templates
   ( prReady,
     reviewTimeout,
+    fixesPushed,
+    commitsPushed,
     copilotReviewReceived,
     siblingMerged,
     ciStatus,
@@ -33,12 +35,26 @@ prReady n =
 -- | No Copilot review within timeout — signals TL to merge if CI passes.
 --
 -- >>> reviewTimeout 42 15
--- "[REVIEW TIMEOUT] PR #42 \x2014 no Copilot review after 15 minutes. PR is ready to merge if CI passes."
+-- "[REVIEW TIMEOUT] PR #42 \x2014 no Copilot review after 15 minutes. Merge with `merge_pr` using `force: true`."
 reviewTimeout :: Int -> Int -> Text
 reviewTimeout n mins =
   "[REVIEW TIMEOUT] PR #" <> T.pack (show n)
     <> " \x2014 no Copilot review after " <> T.pack (show mins)
-    <> " minutes. PR is ready to merge if CI passes."
+    <> " minutes. Merge with `merge_pr` using `force: true`."
+
+-- | Fixes pushed after Copilot review — Copilot does NOT re-review,
+-- so this is the actionable signal for the TL.
+--
+-- >>> fixesPushed 42 "success"
+-- "[FIXES PUSHED] PR #42 \x2014 review comments addressed, fixes pushed. CI passing. Ready to merge."
+fixesPushed :: Int -> Text -> Text
+fixesPushed n ci =
+  "[FIXES PUSHED] PR #" <> T.pack (show n)
+    <> " \x2014 review comments addressed, fixes pushed."
+    <> case ci of
+         "success" -> " CI passing. Ready to merge."
+         "pending" -> " CI running \x2014 merge when green."
+         _ -> " CI status: " <> ci <> "."
 
 -- | Copilot posted review comments — injected into the agent's pane.
 --
@@ -72,3 +88,17 @@ ciStatus n status branch =
          "success" -> "\n\nCI passed."
          "failure" -> "\n\nCI failed. Check the logs and fix the issue before proceeding."
          _ -> ""
+
+-- | New commits pushed to a PR — informational notification to parent.
+--
+-- >>> commitsPushed 42 "success"
+-- "[COMMITS PUSHED] PR #42 \x2014 new commits pushed. CI passing."
+commitsPushed :: Int -> Text -> Text
+commitsPushed n ci =
+  "[COMMITS PUSHED] PR #" <> T.pack (show n)
+    <> " \x2014 new commits pushed."
+    <> case ci of
+         "success" -> " CI passing."
+         "pending" -> " CI running."
+         "failure" -> " CI failing."
+         _ -> " CI status: " <> ci <> "."

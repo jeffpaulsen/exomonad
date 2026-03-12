@@ -355,6 +355,7 @@ impl EffectHandler for MockMergePRHandler {
                 success: true,
                 message: "Merged PR #42".into(),
                 git_fetched: true,
+                branch_name: String::new(),
             }
             .encode_to_vec()),
             _ => Err(EffectError::not_found(format!(
@@ -736,7 +737,8 @@ async fn wasm_merge_pr_roundtrip() {
         "tl",
         "merge_pr",
         json!({
-            "pr_number": 42
+            "pr_number": 42,
+            "force": true
         }),
     )
     .await;

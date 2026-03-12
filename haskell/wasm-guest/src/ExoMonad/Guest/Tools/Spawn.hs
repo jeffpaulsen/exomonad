@@ -14,6 +14,7 @@ where
 
 import Control.Monad (forM, void)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
+import Data.Maybe (fromMaybe)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
@@ -65,7 +66,7 @@ instance FromJSON SpawnSubtreeArgs where
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
   toolName = "spawn_subtree"
-  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. Do not poll or wait. Prefer spawn_leaf_subtree or spawn_workers for implementation work — Gemini agents are highly capable implementers and cost 10-30x less."
+  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. Do not poll or wait. Prefer spawn_leaf_subtree or spawn_workers for implementation work — Gemini agents are highly capable implementers and cost 10-30x less. Spawned agents iterate with Copilot automatically — review comments are injected into their pane and addressed. Do not merge until you receive [PR READY], [FIXES PUSHED], or [REVIEW TIMEOUT] from the event system."
   toolSchema =
     genericToolSchemaWith @SpawnSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
@@ -80,12 +81,12 @@ instance MCPTool SpawnSubtree where
         ("allowed_dirs", "Directories from the parent project to be copied into the agent's context (only for standalone_repo).")
       ]
   toolHandlerEff args = do
-    let forkSession = maybe False id (ssForkSession args)
-        standaloneRepo = maybe False id (ssStandaloneRepo args)
+    let forkSession = fromMaybe False (ssForkSession args)
+        standaloneRepo = fromMaybe False (ssStandaloneRepo args)
         perms = AC.PermissionFlags
           { AC.permMode = ssPermissionMode args,
-            AC.allowedTools = maybe [] id (ssAllowedTools args),
-            AC.disallowedTools = maybe [] id (ssDisallowedTools args)
+            AC.allowedTools = fromMaybe [] (ssAllowedTools args),
+            AC.disallowedTools = fromMaybe [] (ssDisallowedTools args)
           }
         cfg = AC.SpawnSubtreeConfig
           { AC.stcTask = ssTask args
@@ -97,7 +98,7 @@ instance MCPTool SpawnSubtree where
           , AC.stcWorkingDir = ssWorkingDir args
           , AC.stcPermissions = ssPermissions args
           , AC.stcStandaloneRepo = standaloneRepo
-          , AC.stcAllowedDirs = maybe [] id (ssAllowedDirs args)
+          , AC.stcAllowedDirs = fromMaybe [] (ssAllowedDirs args)
           }
     result <- AC.spawnSubtree cfg
     case result of
@@ -146,7 +147,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
   toolName = "spawn_leaf_subtree"
-  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). Gemini is a capable implementer — give it acceptance criteria and file paths, not line-by-line instructions. After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR."
+  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). Gemini is a capable implementer — give it acceptance criteria and file paths, not line-by-line instructions. After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. After filing a PR, the agent iterates with Copilot automatically — review comments are injected and addressed. Do not merge until you receive [PR READY], [FIXES PUSHED], or [REVIEW TIMEOUT] from the event system."
   toolSchema =
     genericToolSchemaWith @SpawnLeafSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
@@ -162,11 +163,11 @@ instance MCPTool SpawnLeafSubtree where
     -- evaluated inside the freer-simple coroutine context on GHC WASM32.
     -- Build prompts as raw Text instead of using the Prompt builder.
     let renderedTask = slsTask args <> "\n\n" <> leafProfileText
-        standaloneRepo = maybe False id (slsStandaloneRepo args)
+        standaloneRepo = fromMaybe False (slsStandaloneRepo args)
         perms = AC.PermissionFlags
           { AC.permMode = slsPermissionMode args,
-            AC.allowedTools = maybe [] id (slsAllowedTools args),
-            AC.disallowedTools = maybe [] id (slsDisallowedTools args)
+            AC.allowedTools = fromMaybe [] (slsAllowedTools args),
+            AC.disallowedTools = fromMaybe [] (slsDisallowedTools args)
           }
         cfg = AC.SpawnLeafSubtreeConfig
           { AC.slcTask = renderedTask
@@ -175,7 +176,7 @@ instance MCPTool SpawnLeafSubtree where
           , AC.slcAgentType = AC.Gemini
           , AC.slcPerms = perms
           , AC.slcStandaloneRepo = standaloneRepo
-          , AC.slcAllowedDirs = maybe [] id (slsAllowedDirs args)
+          , AC.slcAllowedDirs = fromMaybe [] (slsAllowedDirs args)
           }
     result <- AC.spawnLeafSubtree cfg
     case result of
@@ -283,8 +284,8 @@ instance MCPTool SpawnWorkers where
             Nothing -> renderWorkerPrompt spec
           perms = AC.PermissionFlags
             { AC.permMode = wsPermissionMode spec,
-              AC.allowedTools = maybe [] id (wsAllowedTools spec),
-              AC.disallowedTools = maybe [] id (wsDisallowedTools spec)
+              AC.allowedTools = fromMaybe [] (wsAllowedTools spec),
+              AC.disallowedTools = fromMaybe [] (wsDisallowedTools spec)
             }
           cfg = AC.SpawnWorkerConfig
             { AC.swcName = wsName spec,
@@ -354,8 +355,8 @@ instance MCPTool SpawnAcp where
     let renderedPrompt = saPrompt args <> "\n\n" <> workerProfileText
         perms = AC.PermissionFlags
           { AC.permMode = saPermissionMode args,
-            AC.allowedTools = maybe [] id (saAllowedTools args),
-            AC.disallowedTools = maybe [] id (saDisallowedTools args)
+            AC.allowedTools = fromMaybe [] (saAllowedTools args),
+            AC.disallowedTools = fromMaybe [] (saDisallowedTools args)
           }
         cfg = AC.SpawnAcpConfig
           { AC.sacName = saName args,
