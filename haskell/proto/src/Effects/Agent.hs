@@ -3195,3 +3195,110 @@ instance (HsJSONPB.ToJSON SpawnAcpResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SpawnAcpResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+newtype CloseSelfRequest
+  = CloseSelfRequest {closeSelfRequestReason :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData CloseSelfRequest)
+instance (HsProtobuf.Named CloseSelfRequest) where
+  nameOf _ = Hs.fromString "CloseSelfRequest"
+instance (HsProtobuf.HasDefault CloseSelfRequest)
+instance (HsProtobuf.Message CloseSelfRequest) where
+  encodeMessage _ CloseSelfRequest {closeSelfRequestReason}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+            closeSelfRequestReason))
+  decodeMessage _
+    = Hs.pure CloseSelfRequest
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "reason") [] ""]
+instance (HsJSONPB.ToJSONPB CloseSelfRequest) where
+  toJSONPB (CloseSelfRequest f1)
+    = HsJSONPB.object
+        ["reason"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)]
+  toEncodingPB (CloseSelfRequest f1)
+    = HsJSONPB.pairs
+        ["reason"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)]
+instance (HsJSONPB.FromJSONPB CloseSelfRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "CloseSelfRequest"
+        (\ obj
+           -> Hs.pure CloseSelfRequest
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "reason")))
+instance (HsJSONPB.ToJSON CloseSelfRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON CloseSelfRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+data CloseSelfResponse
+  = CloseSelfResponse {closeSelfResponseSuccess :: Hs.Bool,
+                       closeSelfResponseError :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData CloseSelfResponse)
+instance (HsProtobuf.Named CloseSelfResponse) where
+  nameOf _ = Hs.fromString "CloseSelfResponse"
+instance (HsProtobuf.HasDefault CloseSelfResponse)
+instance (HsProtobuf.Message CloseSelfResponse) where
+  encodeMessage
+    _
+    CloseSelfResponse {closeSelfResponseSuccess,
+                       closeSelfResponseError}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1) closeSelfResponseSuccess)
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              closeSelfResponseError))
+  decodeMessage _
+    = Hs.pure CloseSelfResponse
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "success") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "error") [] ""]
+instance (HsJSONPB.ToJSONPB CloseSelfResponse) where
+  toJSONPB (CloseSelfResponse f1 f2)
+    = HsJSONPB.object
+        ["success" .= f1,
+         "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+  toEncodingPB (CloseSelfResponse f1 f2)
+    = HsJSONPB.pairs
+        ["success" .= f1,
+         "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+instance (HsJSONPB.FromJSONPB CloseSelfResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "CloseSelfResponse"
+        (\ obj
+           -> Hs.pure CloseSelfResponse <*> obj .: "success"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "error")))
+instance (HsJSONPB.ToJSON CloseSelfResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON CloseSelfResponse) where
+  parseJSON = HsJSONPB.parseJSONPB

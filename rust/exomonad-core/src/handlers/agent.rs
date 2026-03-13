@@ -557,6 +557,23 @@ impl AgentEffects for AgentHandler {
         let agents = infos.iter().map(service_info_to_proto).collect();
         Ok(ListResponse { agents })
     }
+
+    async fn close_self(
+        &self,
+        _req: CloseSelfRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<CloseSelfResponse> {
+        let slug_key = format!("{}/{}", ctx.birth_branch, ctx.agent_name);
+
+        crate::services::zellij_events::close_worker_pane(&slug_key);
+
+        info!(slug_key = %slug_key, "Agent requested self-closure");
+
+        Ok(CloseSelfResponse {
+            success: true,
+            error: String::new(),
+        })
+    }
 }
 
 fn spawn_result_to_proto(

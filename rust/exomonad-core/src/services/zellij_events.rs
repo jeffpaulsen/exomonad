@@ -158,6 +158,56 @@ pub fn register_worker_pane(slug_key: &str, display_name: &str) {
     });
 }
 
+/// Close a worker pane via the Zellij plugin.
+///
+/// Fire-and-forget: errors are logged, not propagated.
+pub fn close_worker_pane(slug_key: &str) {
+    let plugin_path = match crate::layout::resolve_plugin_path() {
+        Some(p) => p,
+        None => {
+            warn!("[ZellijEvents] Plugin not found, skipping close_worker_pane");
+            return;
+        }
+    };
+
+    let session = match std::env::var("ZELLIJ_SESSION_NAME") {
+        Ok(s) => s,
+        Err(_) => {
+            warn!("[ZellijEvents] ZELLIJ_SESSION_NAME not set, skipping close_worker_pane");
+            return;
+        }
+    };
+
+    let payload = serde_json::json!({
+        "slug_key": slug_key,
+    })
+    .to_string();
+
+    info!("[ZellijEvents] Closing worker pane slug '{}'", slug_key);
+
+    let ipc = ZellijIpc::new(&session);
+    let pipe_name = transport::CLOSE_PANE_PIPE.to_string();
+
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            ipc.pipe_to_plugin(&plugin_path, &pipe_name, &payload)
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => warn!(
+                "[ZellijEvents] close_worker_pane pipe_to_plugin failed: {}",
+                e
+            ),
+            Err(e) => warn!(
+                "[ZellijEvents] close_worker_pane spawn_blocking join error: {}",
+                e
+            ),
+        }
+    });
+}
+
 /// Helper to get current timestamp in ISO 8601 format.
 pub fn now_iso8601() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)

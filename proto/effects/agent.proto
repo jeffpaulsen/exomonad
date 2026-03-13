@@ -342,6 +342,20 @@ message SpawnAcpResponse {
 }
 
 // ============================================================================
+// CloseSelf - Close the calling agent's own pane
+// ============================================================================
+
+message CloseSelfRequest {
+  // Optional reason for closing (logged, not delivered).
+  string reason = 1;
+}
+
+message CloseSelfResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// ============================================================================
 // Service definition
 // ============================================================================
 
@@ -357,4 +371,5 @@ service AgentEffects {
   rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);
   rpc List(ListRequest) returns (ListResponse);
+  rpc CloseSelf(CloseSelfRequest) returns (CloseSelfResponse);
 }

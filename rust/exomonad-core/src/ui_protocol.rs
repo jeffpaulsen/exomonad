@@ -31,6 +31,9 @@ pub mod transport {
     /// Sent at worker spawn time so the plugin can resolve the pane by slug
     /// even after Gemini CLI renames it.
     pub const REGISTER_PANE_PIPE: &str = "exomonad:register-pane";
+
+    /// Pipe name for closing a pane via the plugin.
+    pub const CLOSE_PANE_PIPE: &str = "exomonad:close-pane";
 }
 
 // ============================================================================

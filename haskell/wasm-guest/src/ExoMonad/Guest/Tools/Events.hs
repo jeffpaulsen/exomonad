@@ -6,6 +6,7 @@
 module ExoMonad.Guest.Tools.Events
   ( NotifyParent (..),
     SendMessage (..),
+    Shutdown,
   )
 where
 
@@ -17,7 +18,9 @@ import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import Effects.Agent qualified as AgentProto
 import Effects.Log qualified as Log
+import ExoMonad.Effects.Agent qualified as ProtoAgent
 import ExoMonad.Effects.Events qualified as ProtoEvents
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
@@ -188,3 +191,39 @@ instance MCPTool SendMessage where
         [ "success" .= ProtoEvents.sendMessageResponseSuccess resp,
           "delivery_method" .= ProtoEvents.sendMessageResponseDeliveryMethod resp
         ]
+
+-- | Shutdown tool for cooperative agent exit
+data Shutdown = Shutdown
+
+data ShutdownArgs = ShutdownArgs
+  { sdMessage :: Maybe Text
+  }
+  deriving (Generic, Show)
+
+instance FromJSON ShutdownArgs where
+  parseJSON = withObject "ShutdownArgs" $ \v ->
+    ShutdownArgs <$> v .:? "message"
+
+instance ToJSON ShutdownArgs where
+  toJSON args = object ["message" .= sdMessage args]
+
+instance MCPTool Shutdown where
+  type ToolArgs Shutdown = ShutdownArgs
+  toolName = "shutdown"
+  toolDescription = "Gracefully shut down this agent. Sends a final message to your parent, then exits. Call this when instructed to shut down or when your work is complete."
+  toolSchema =
+    genericToolSchemaWith @ShutdownArgs
+      [("message", "Optional final message to send to parent before shutting down")]
+  toolHandlerEff args = do
+    let msg = maybe "Shutting down." id (sdMessage args)
+    let statusText = "success" :: Text
+    void $ suspendEffect @ProtoEvents.EventsNotifyParent
+      (ProtoEvents.NotifyParentRequest
+        { ProtoEvents.notifyParentRequestAgentId = "",
+          ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+          ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg
+        })
+    void $ suspendEffect @ProtoAgent.AgentCloseSelf
+      (AgentProto.CloseSelfRequest
+        { AgentProto.closeSelfRequestReason = TL.fromStrict msg })
+    pure $ successResult $ object ["shutdown" .= True]

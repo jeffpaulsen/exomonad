@@ -12,7 +12,8 @@ import ExoMonad.Types (HookConfig (..), defaultSessionStartHook)
 
 data Tools mode = Tools
   { notifyParent :: mode :- NotifyParent,
-    sendMessage :: mode :- SendMessage
+    sendMessage :: mode :- SendMessage,
+    shutdown :: mode :- Shutdown
   }
   deriving (Generic)
 
@@ -23,7 +24,8 @@ config =
       tools =
         Tools
           { notifyParent = mkHandler @NotifyParent,
-            sendMessage = mkHandler @SendMessage
+            sendMessage = mkHandler @SendMessage,
+            shutdown = mkHandler @Shutdown
           },
       hooks =
         HookConfig

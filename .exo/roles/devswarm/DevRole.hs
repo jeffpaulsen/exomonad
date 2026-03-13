@@ -13,7 +13,8 @@ import PRReviewHandler (prReviewEventHandlers)
 data Tools mode = Tools
   { pr :: FilePRTools mode,
     notifyParent :: mode :- NotifyParent,
-    sendMessage :: mode :- SendMessage
+    sendMessage :: mode :- SendMessage,
+    shutdown :: mode :- Shutdown
   }
   deriving (Generic)
 
@@ -25,7 +26,8 @@ config =
         Tools
           { pr = filePRTools,
             notifyParent = mkHandler @NotifyParent,
-            sendMessage = mkHandler @SendMessage
+            sendMessage = mkHandler @SendMessage,
+            shutdown = mkHandler @Shutdown
           },
       hooks = httpDevHooks,
       eventHandlers = prReviewEventHandlers

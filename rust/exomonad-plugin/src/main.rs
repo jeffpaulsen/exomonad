@@ -357,6 +357,8 @@ struct ExoMonadPlugin {
     /// Pane IDs awaiting a deferred Enter keypress (after text injection).
     /// Delayed to ensure Node.js/Ink processes the text and Enter as separate data events.
     pending_enter: Vec<u32>,
+    /// Pane IDs awaiting deferred close (after shutdown tool response flows back).
+    pending_close: Vec<u32>,
     /// Inject-input messages waiting for tab/pane state to be initialized.
     /// Flushed on TabUpdate/PaneUpdate when own_tab_name and tab_pane_map become available.
     pending_injections: Vec<PendingInjection>,
@@ -845,6 +847,8 @@ impl ZellijPlugin for ExoMonadPlugin {
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
+        self.pending_enter = Vec::new();
+        self.pending_close = Vec::new();
         self.own_pane_id = get_plugin_ids().plugin_id;
         // Initialize terminal with ZellijBackend
         if let Ok(term) = Terminal::new(ZellijBackend) {
@@ -1188,6 +1192,40 @@ impl ZellijPlugin for ExoMonadPlugin {
             return true;
         }
 
+        // Handle close-pane requests: close a worker pane by slug key with delay.
+        if pipe_message.name == transport::CLOSE_PANE_PIPE {
+            if let Some(payload) = pipe_message.payload {
+                match serde_json::from_str::<serde_json::Value>(&payload) {
+                    Ok(val) => {
+                        let slug_key = match val["slug_key"].as_str() {
+                            Some(s) => s.to_string(),
+                            None => {
+                                eprintln!("[exomonad-plugin] close-pane: missing slug_key");
+                                return false;
+                            }
+                        };
+                        if let Some(&pane_id) = self.slug_pane_map.get(&slug_key) {
+                            eprintln!(
+                                "[exomonad-plugin] close-pane: scheduling close for slug '{}' → pane {}",
+                                slug_key, pane_id
+                            );
+                            self.pending_close.push(pane_id);
+                            set_timeout(1.0);
+                        } else {
+                            eprintln!(
+                                "[exomonad-plugin] close-pane: slug '{}' not found in slug_pane_map",
+                                slug_key
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[exomonad-plugin] close-pane: invalid JSON: {}", e);
+                    }
+                }
+            }
+            return false;
+        }
+
         // Handle pipe messages from zellij pipe --name exomonad-events
         if pipe_message.name == "exomonad-events" {
             if let Some(payload) = pipe_message.payload {
@@ -1385,6 +1423,10 @@ impl ZellijPlugin for ExoMonadPlugin {
                 const ENTER_KEY: u8 = 13;
                 for pane_id in self.pending_enter.drain(..) {
                     write_to_pane_id(vec![ENTER_KEY], PaneId::Terminal(pane_id));
+                }
+                for pane_id in self.pending_close.drain(..) {
+                    eprintln!("[exomonad-plugin] closing pane {}", pane_id);
+                    close_terminal_pane(pane_id);
                 }
             }
             _ => {}
