@@ -6,9 +6,24 @@ All orchestration logic — tool dispatch, hooks, event handling, PR review rout
 
 ![Zellij devswarm — TL dispatching to three Gemini workers in parallel, each in its own worktree. Bottom panes show workers mid-execution.](img/exomonad_zellij_devswarm.png)
 
-## Install
+## Try It
 
-Requires [Nix](https://nixos.org/) and [Zellij](https://zellij.dev/) **0.43.x** (IPC is version-coupled).
+Run ExoMonad on any GitHub repo. One command, clean container, no local dependencies beyond Docker.
+
+```bash
+git clone https://github.com/tidepool-heavy-industries/exomonad
+cd exomonad
+just install-all-dev                              # Build artifacts (first time only)
+./try-exomonad/run.sh https://github.com/user/repo
+```
+
+This builds a Docker image with the correct Zellij version, pre-built WASM, and all dependencies. You land in a Zellij session with MCP tools ready. Auth is automatic — your `~/.claude` and `~/.gemini` credentials are mounted from the host.
+
+See [try-exomonad/README.md](try-exomonad/README.md) for details.
+
+## Install (Native)
+
+Requires [Nix](https://nixos.org/) and [Zellij](https://zellij.dev/) **0.43.x** (IPC is version-coupled — 0.42.x and 0.44.x will not work). If you hit Zellij issues, use the Docker path above instead.
 
 ```bash
 git clone https://github.com/tidepool-heavy-industries/exomonad
@@ -40,8 +55,6 @@ cd ~/my-project
 exomonad init
 # → Copies WASM from ~/.exo/wasm/, starts server, MCP registered
 ```
-
-Or try it in a container with zero setup: see [try-exomonad/](try-exomonad/).
 
 ## How It Works
 
