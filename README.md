@@ -8,7 +8,7 @@ All orchestration logic — tool dispatch, hooks, event handling, PR review rout
 
 ## Install
 
-Requires [Nix](https://nixos.org/) and [Zellij](https://zellij.dev/).
+Requires [Nix](https://nixos.org/) and [Zellij](https://zellij.dev/) **0.43.x** (IPC is version-coupled).
 
 ```bash
 git clone https://github.com/tidepool-heavy-industries/exomonad
