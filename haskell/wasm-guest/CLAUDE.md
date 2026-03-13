@@ -75,8 +75,8 @@ Pure Haskell prompt assembly for worker/leaf agents. Replaces the former templat
 | Role | Tools | Spawned by |
 |------|-------|------------|
 | **tl** | spawn (3), merge_pr, file_pr, popup, notify_parent, send_message | `spawn_subtree` |
-| **dev** | file_pr, notify_parent, send_message | `spawn_leaf_subtree` |
-| **worker** | notify_parent, send_message | `spawn_workers` |
+| **dev** | file_pr, notify_parent, send_message, shutdown | `spawn_leaf_subtree` |
+| **worker** | notify_parent, send_message, shutdown | `spawn_workers` |
 
 ## Hooks
 

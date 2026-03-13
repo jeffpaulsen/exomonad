@@ -340,6 +340,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `popup` | tl | Show interactive forms in a tiled split pane via ZellijIpc pipe |
 | `notify_parent` | all | Send message to parent agent. Auto-routed via Teams inbox (primary) or Zellij STDIN (fallback) |
 | `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or Zellij) |
+| `shutdown` | dev, worker | Gracefully exit: notify parent, close own pane |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
 

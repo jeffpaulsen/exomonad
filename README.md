@@ -1,82 +1,120 @@
 # ExoMonad
 
-Orchestrate heterogeneous LLM agent teams from your CLI.
+You're in Claude Code. You need to implement a feature that touches 8 files across Rust and Haskell. Instead of doing it yourself, you describe three tasks and spawn Gemini workers. Three panes open in your Zellij session. Each worker implements its piece. Messages arrive in your conversation when they finish. You merge the results. Total cost: 10-30x less than doing it yourself in Opus.
 
-ExoMonad lets you spawn and manage teams of LLM agents (Claude + Gemini) directly from a single CLI session. Each agent operates in its own isolated git worktree, performing tasks, filing PRs, and notifying you when they finish—all integrated into your native Claude Code or Gemini CLI conversation.
+ExoMonad is an agent orchestration runtime that gives Claude Code (and Gemini CLI) the ability to spawn, coordinate, and manage teams of LLM agents. It integrates directly into your existing CLI workflow — no new UI, no web dashboard, no context switching.
 
-## Key Features
-- **Heterogeneous Agents**: Deploy Claude (Opus) for high-level architecture and Gemini for fast, focused implementation.
-- **Git Worktree Isolation**: Every agent gets its own directory and branch. No merge conflicts while work is in progress.
-- **Native Teams Inbox Delivery**: Child agents notify the parent via Claude Code's Teams inbox. Completion messages arrive as native `<teammate-message>` events — structured, attributed, and delivered through the official Claude Code inbox mechanism. No polling, no stdin hacks, no context switching.
-- **Haskell WASM DSL**: Agent logic and tool definitions are written in Haskell and compiled to WASM. Hot reload by editing a tool and running your next command.
-- **Bidirectional Messaging**: Agents can send messages to each other mid-task — a stuck worker can ask the TL for guidance, and the TL can redirect a running agent without killing it.
-- **Template System**: Reuse verified patterns and anti-patterns across worker specs to save up to 89% on orchestration tokens.
+## What It Looks Like
 
-## Quick Demo
+```
+You (in Claude Code):  "Implement close_self effect — proto, Rust handler, Haskell types, plugin"
 
-Spawn multiple Gemini workers to implement features in parallel from your Claude session:
+Claude spawns 3 Gemini workers:
 
-```bash
-# In your Claude session:
-spawn_workers agents=[
-  { name: "rust-impl", role: "dev", task: "Implement the Rust effect handlers" },
-  { name: "haskell-sdk", role: "dev", task: "Add corresponding Haskell effect types" }
-]
+  ┌─ TL (Claude Opus) ──────────────────────────────────────────────┐
+  │  You: "implement the plan"                                      │
+  │  Claude: spawning 3 workers...                                  │
+  │                                                                 │
+  │  [from: rust-close-self] Done. cargo build passes.              │
+  │  [from: haskell-close-self] Done. cabal build passes.           │
+  │  [from: plugin-close-pane] Done. wasm32 build passes.           │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ 💎 rust-close-self  │ 💎 haskell-close-self │ 💎 plugin-close  │
+  │ (working...)        │ (working...)          │ (working...)      │
+  └─────────────────────────────────────────────────────────────────┘
 ```
 
-**What happens:**
-1. Two new Zellij panes open immediately.
-2. Each worker starts implementing its assigned task in isolation.
-3. You continue working in your main tab.
-4. When a worker finishes, it calls `notify_parent` — the message lands in your Claude conversation as a native teammate notification via the Teams inbox.
+Workers run in parallel, notify you when done, and close their own panes.
 
 ## Install
 
-### For Users
-Requires [Nix](https://nixos.org/) (for Haskell WASM compilation) and [Zellij](https://zellij.dev/).
+Requires [Nix](https://nixos.org/) and [Zellij](https://zellij.dev/).
+
 ```bash
 git clone https://github.com/tidepool-heavy-industries/exomonad
 cd exomonad
-just install-all  # Builds WASM via Nix, compiles Rust, installs to ~/.cargo/bin/
+just install-all      # Release build (optimized, slower compile)
+# or
+just install-all-dev  # Debug build (fast compile, good for development)
 ```
 
-### For Developers
-Requires [Nix](https://nixos.org/) for the Haskell WASM build.
-```bash
-git clone https://github.com/tidepool-heavy-industries/exomonad
-cd exomonad
-just install-all-dev  # Builds WASM via Nix and installs the Rust binary to ~/.cargo/bin/
-```
+This builds the Haskell WASM plugin (via Nix), the Rust binary, and the Zellij plugin, then installs everything to `~/.cargo/bin/` and `~/.config/zellij/plugins/`.
 
 ## Getting Started
 
-1. **Initialize**: Run `exomonad init` in your project root. This starts the background server and sets up your environment.
-2. **Register MCP** (one-time):
-   ExoMonad is auto-configured by `exomonad init`. It adds itself to your Claude/Gemini config via `.mcp.json` using the `stdio` transport. No manual registration is required.
-3. **Launch Agent**: Open the Tech Lead tab in your Zellij session and run `claude`.
-4. **Orchestrate**: Delegate tasks using tools like `spawn_workers` or `spawn_subtree`.
+```bash
+cd your-project/
+exomonad init       # Creates Zellij session with Server + TL tabs
+                    # Writes .mcp.json (auto-registers MCP tools)
+                    # Starts background server on .exo/server.sock
+```
 
-## Architecture
+You're now in a Zellij session. Switch to the **TL tab** and run `claude`. ExoMonad's MCP tools are available immediately — Claude can spawn agents, file PRs, and coordinate work.
 
-ExoMonad uses a split architecture for safety and performance:
-- **Haskell WASM**: Defines all tool logic, schemas, and agent decision trees. Agents are IO-blind state machines.
-- **Rust Runtime**: Hosts the WASM plugin and executes all side effects (Git, GitHub API, Filesystem, Zellij).
-- **Zellij**: Provides process isolation and multiplexing for agent tabs and panes.
+### Use on any project
 
-See [CLAUDE.md](CLAUDE.md) for a deep dive into the system architecture.
+ExoMonad works on any git repository. For a new project:
+
+```bash
+cd ~/my-project
+cp -r /path/to/exomonad/.exo/roles .exo/roles
+cp -r /path/to/exomonad/.exo/lib .exo/lib
+exomonad init
+# → Server starts, MCP registered, Zellij session ready
+```
+
+Or try it in a container with zero setup: see [try-exomonad/](try-exomonad/).
+
+## How It Works
+
+**Three layers, each doing one thing:**
+
+| Layer | What | Why |
+|-------|------|-----|
+| **Haskell WASM** | Tool definitions, schemas, decision logic | Pure logic, no I/O, hot-reloadable |
+| **Rust runtime** | Executes effects (git, GitHub API, filesystem, Zellij IPC) | Performance, safety |
+| **Zellij** | Process isolation (tabs for subtrees, panes for workers) | Multiplexing without Docker |
+
+Agents are IO-blind state machines compiled to WASM. They yield typed effects; Rust executes them. This means tool logic is deterministic, testable, and hot-reloadable — edit a Haskell tool, run `just wasm-all`, and the next MCP call picks up the change.
+
+**Agent types:**
+
+| Spawn tool | Creates | Isolation | Use case |
+|------------|---------|-----------|----------|
+| `spawn_workers` | Gemini panes in your tab | Shared directory, no branch | Fast parallel tasks (10-30x cheaper than Opus) |
+| `spawn_leaf_subtree` | Gemini in own worktree + tab | Own branch, files PR | Independent features that need isolation |
+| `spawn_subtree` | Claude in own worktree + tab | Own branch, can spawn children | Complex decomposition (TL role, recursive) |
+
+**Communication:** Child agents call `notify_parent` when done. Messages arrive in your Claude conversation as native teammate notifications via the Teams inbox. No polling, no stdin hacks.
 
 ## Available Tools
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork a Claude agent into a new worktree and Zellij tab. |
-| `spawn_leaf_subtree` | tl | Fork a Gemini agent into a new worktree and Zellij tab. |
-| `spawn_workers` | tl | Spawn Gemini agents as Zellij panes in the current directory. |
-| `file_pr` | tl, dev | Create or update a pull request for the current branch. |
-| `merge_pr` | tl | Merge a child agent's PR and fetch the changes. |
-| `popup` | tl | Show interactive forms in a tiled split pane. |
-| `notify_parent` | all | Send message to the parent agent via the Teams inbox. |
-| `send_message` | all | Send a message to another agent (routes via Teams inbox, ACP, UDS, or Zellij). |
+| `spawn_subtree` | tl | Fork a Claude agent into a new worktree and Zellij tab |
+| `spawn_leaf_subtree` | tl | Fork a Gemini agent into a new worktree and Zellij tab |
+| `spawn_workers` | tl | Spawn Gemini agents as panes (ephemeral, no branch) |
+| `file_pr` | tl, dev | Create or update a PR for the current branch |
+| `merge_pr` | tl | Merge a child agent's PR and fetch changes |
+| `popup` | tl | Show interactive forms in a tiled split pane |
+| `notify_parent` | all | Send message to parent agent via Teams inbox |
+| `send_message` | all | Send message to any agent (Teams, ACP, UDS, or Zellij) |
+| `shutdown` | dev, worker | Gracefully exit: notify parent, close own pane |
+
+## Development
+
+```bash
+just install-all-dev    # Full build (WASM + Rust + install)
+just wasm-all           # Rebuild WASM only (after Haskell changes)
+just proto-gen          # Regenerate proto types (Rust + Haskell)
+cargo test --workspace  # Rust tests
+just fmt                # Format all code
+```
+
+All `just` recipes handle their own Nix dependencies — no need to be in a `nix develop` shell.
+
+See [CLAUDE.md](CLAUDE.md) for the full architecture, data flows, and contributor guide.
 
 ## License
+
 ExoMonad is released under the [BSD 3-Clause License](LICENSE).
