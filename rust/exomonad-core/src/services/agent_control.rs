@@ -1806,6 +1806,9 @@ impl AgentControlService {
         env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.to_string());
         env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
         env_vars.insert("EXOMONAD_ROLE".to_string(), role.to_string());
+        if let Some(ref session) = self.tmux_session {
+            env_vars.insert("EXOMONAD_TMUX_SESSION".to_string(), session.clone());
+        }
         env_vars
     }
 

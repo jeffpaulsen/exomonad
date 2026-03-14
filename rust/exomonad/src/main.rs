@@ -726,7 +726,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
     let session_alive = TmuxIpc::has_session(&session)?;
 
-    if recreate && session_alive {
+    if recreate {
         // Kill the running server process before tearing down the session
         let pid_path = cwd.join(".exo/server.pid");
         if let Ok(content) = std::fs::read_to_string(&pid_path) {
@@ -738,7 +738,6 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
                     if signal::kill(pid, None).is_ok() {
                         info!(pid = pid.as_raw(), "Stopping server");
                         let _ = signal::kill(pid, signal::Signal::SIGTERM);
-                        // Wait briefly for graceful shutdown
                         for _ in 0..10 {
                             if signal::kill(pid, None).is_err() {
                                 break;
@@ -749,14 +748,18 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
                 }
             }
         }
-        // Clean up stale socket
+        // Clean up stale socket (unconditional — may exist from a previous session
+        // even if tmux isn't running, e.g. after migrating from Zellij)
         let sock = cwd.join(".exo/server.sock");
         if sock.exists() {
+            info!("Removing stale server socket");
             let _ = std::fs::remove_file(&sock);
         }
 
-        info!(session = %session, "Deleting session (--recreate)");
-        TmuxIpc::kill_session(&session)?;
+        if session_alive {
+            info!(session = %session, "Deleting session (--recreate)");
+            TmuxIpc::kill_session(&session)?;
+        }
     } else if session_alive {
         // Attach to running session (exec replaces process, releasing the binary)
         info!(session = %session, "Attaching to session");
@@ -811,8 +814,9 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     if !status.success() {
         warn!("tmux rename-window failed with status: {}", status);
     }
+    let serve_cmd = format!("EXOMONAD_TMUX_SESSION={} exomonad serve", &session);
     let status = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", &server_target, "exomonad serve", "Enter"])
+        .args(["send-keys", "-t", &server_target, &serve_cmd, "Enter"])
         .status()
         .context("Failed to run tmux send-keys")?;
     if !status.success() {

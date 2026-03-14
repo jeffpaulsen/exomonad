@@ -19,7 +19,7 @@ ExoMonad core is the unified library providing the effect system framework, WASM
 |---------|---------|-------------|
 | `runtime` | Yes | Full runtime: WASM hosting, effect handlers, services |
 
-Without `runtime`: only `ui_protocol` module available. Used by `exomonad-plugin` which targets wasm32-wasi.
+Without `runtime`: only `ui_protocol` module available (agent event types, telemetry).
 
 ## Key Types
 
