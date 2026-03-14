@@ -56,13 +56,13 @@ runHookEff eff = do
 
 -- | Helper for fire-and-forget logging via yield_effect.
 logInfo_ :: Text -> IO (WasmResult ())
-logInfo_ msg = runHookEff $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
+logInfo_ msg = runHookEff $ void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
 
 logError_ :: Text -> IO (WasmResult ())
-logError_ msg = runHookEff $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
+logError_ msg = runHookEff $ void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
 
 emitEvent_ :: Value -> IO (WasmResult ())
-emitEvent_ val = runHookEff $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
+emitEvent_ val = runHookEff $ void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
 
 -- | Sequential logging helper that handles suspension.
 andThenLog :: IO (WasmResult ()) -> IO (WasmResult a) -> IO (WasmResult a)
@@ -71,6 +71,14 @@ andThenLog first second = do
   case res of
     Done () -> second
     Suspend k req -> pure $ Suspend k req
+
+-- | Sequential logging helper that returns a Value.
+andThenLogValue :: IO (WasmResult ()) -> IO Value -> IO Value
+andThenLogValue first second = do
+  res <- first
+  case res of
+    Done () -> second
+    Suspend k req -> pure $ Aeson.toJSON (Suspend @Value k req)
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt
@@ -115,8 +123,8 @@ resumeHandler = do
     Right val -> do
       case parseResumeInput val of
         Left err -> do
-          res <- logError_ ("Resume input error: " <> err)
-          case res of
+          res_ <- logError_ ("Resume input error: " <> err)
+          case res_ of
             Done () -> do
               let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume input error: " <> err)
               output (BSL.toStrict $ Aeson.encode resp)
@@ -134,7 +142,7 @@ resumeHandler = do
                 Suspend k_ req -> output (BSL.toStrict $ Aeson.encode (Suspend @MCPCallOutput k_ req))
               pure 0
             Just cont -> do
-              result <- logInfo_ ("Resuming continuation: " <> k) `andThenLog` (cont res)
+              result <- cont res
               output (BSL.toStrict $ Aeson.encode result)
               pure 0
 
@@ -183,7 +191,7 @@ hookHandler config = do
             PostToolUse -> "PostToolUse"
             WorkerExit -> "WorkerExit"
       
-      result <- logInfo_ ("Hook received: " <> hookName) `andThenLog` do
+      result <- logInfo_ ("Hook received: " <> hookName) `andThenLogValue` do
         case hookType of
           SessionStart -> handleSessionStart hookInput (onSessionStart config)
           SessionEnd -> handleStopHook hookInput (onStop config)
@@ -196,13 +204,13 @@ hookHandler config = do
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
   where
-    handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO (WasmResult HookOutput)
-    handleSessionStart hookInput hook = runHookEff (hook hookInput)
+    handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO Value
+    handleSessionStart hookInput hook = Aeson.toJSON <$> runHookEff (hook hookInput)
 
-    handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO (WasmResult HookOutput)
-    handlePreToolUse hookInput hook = runHookEff (hook hookInput)
+    handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO Value
+    handlePreToolUse hookInput hook = Aeson.toJSON <$> runHookEff (hook hookInput)
 
-    handleStopHook :: HookInput -> (HookInput -> Eff HookEffects StopHookOutput) -> IO (WasmResult StopHookOutput)
+    handleStopHook :: HookInput -> (HookInput -> Eff HookEffects StopHookOutput) -> IO Value
     handleStopHook hookInput hook = do
       -- Extract agent ID from hook input or fallback to current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
@@ -213,7 +221,7 @@ hookHandler config = do
       let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
 
       -- Log that stop hook was called
-      logInfo_ ("Stop hook firing for agent: " <> agentId) `andThenLog` do
+      logInfo_ ("Stop hook firing for agent: " <> agentId) `andThenLogValue` do
         -- Emit AgentStopped event BEFORE running checks
         -- This ensures we see the event even if checks fail
         let event =
@@ -222,7 +230,7 @@ hookHandler config = do
                   "agent_id" .= agentId,
                   "timestamp" .= timestamp
                 ]
-        emitEvent_ event `andThenLog` do
+        emitEvent_ event `andThenLogValue` do
           -- Run the hook from config (using Freer effects)
           result <- runHookEff (hook hookInput)
 
@@ -238,21 +246,21 @@ hookHandler config = do
 
           -- Log the decision
           case finalResult of
-            Done res ->
+            Done res -> do
               let logMsg = case decision res of
                     Allow -> "Stop hook allowed for " <> agentId
                     Block ->
                       case reason res of
                         Just r -> "Stop hook blocked for " <> agentId <> ": " <> r
                         Nothing -> "Stop hook blocked for " <> agentId
-              in logInfo_ logMsg `andThenLog` pure (Done res)
+              logInfo_ logMsg `andThenLogValue` pure (Aeson.toJSON finalResult)
             Suspend k req ->
-              logInfo_ ("Stop hook suspended for " <> agentId) `andThenLog` pure (Suspend k req)
+              logInfo_ ("Stop hook suspended for " <> agentId) `andThenLogValue` pure (Aeson.toJSON finalResult)
 
-handleWorkerExit :: HookInput -> IO (WasmResult HookOutput)
+handleWorkerExit :: HookInput -> IO Value
 handleWorkerExit hookInput = do
-  logInfo_ "WorkerExit hook firing" `andThenLog` do
-    runHookEff $ do
+  logInfo_ "WorkerExit hook firing" `andThenLogValue` do
+    res_ <- runHookEff $ do
       let maybeAgentId = hiAgentId hookInput
       case maybeAgentId of
         Just agentId -> do
@@ -272,6 +280,7 @@ handleWorkerExit hookInput = do
         Nothing -> do
           void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = "agent_id missing from hook input", Log.errorRequestFields = "" })
       pure (allowResponse Nothing)
+    pure (Aeson.toJSON res_)
 
 -- | Wrap a handler with exception handling.
 wrapHandler :: IO CInt -> IO CInt

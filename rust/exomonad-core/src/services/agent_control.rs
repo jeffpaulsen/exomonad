@@ -782,17 +782,22 @@ impl AgentControlService {
             );
 
             // Open tmux window with cwd = worktree_path
-            let window_id = self.new_tmux_window(
-                &display_name,
-                &agent_dir,
-                options.agent_type,
-                Some(&initial_prompt),
-                env_vars,
-            )
-            .await?;
+            let window_id = self
+                .new_tmux_window(
+                    &display_name,
+                    &agent_dir,
+                    options.agent_type,
+                    Some(&initial_prompt),
+                    env_vars,
+                )
+                .await?;
 
             // Store window_id for message delivery and cleanup
-            let agent_config_dir = self.project_dir.join(".exo").join("agents").join(&internal_name);
+            let agent_config_dir = self
+                .project_dir
+                .join(".exo")
+                .join("agents")
+                .join(&internal_name);
             fs::create_dir_all(&agent_config_dir).await?;
             let routing = serde_json::json!({
                 "window_id": window_id.as_str(),
@@ -800,7 +805,8 @@ impl AgentControlService {
             fs::write(
                 agent_config_dir.join("routing.json"),
                 serde_json::to_string_pretty(&routing)?,
-            ).await?;
+            )
+            .await?;
 
             self.emit_agent_started(&internal_name)?;
 
@@ -955,17 +961,22 @@ impl AgentControlService {
                 );
             }
 
-            let window_id = self.new_tmux_window(
-                &display_name,
-                &worktree_path,
-                options.agent_type,
-                Some(&options.prompt),
-                env_vars,
-            )
-            .await?;
+            let window_id = self
+                .new_tmux_window(
+                    &display_name,
+                    &worktree_path,
+                    options.agent_type,
+                    Some(&options.prompt),
+                    env_vars,
+                )
+                .await?;
 
             // Store window_id for message delivery and cleanup
-            let agent_config_dir = self.project_dir.join(".exo").join("agents").join(&internal_name);
+            let agent_config_dir = self
+                .project_dir
+                .join(".exo")
+                .join("agents")
+                .join(&internal_name);
             fs::create_dir_all(&agent_config_dir).await?;
             let routing = serde_json::json!({
                 "window_id": window_id.as_str(),
@@ -973,7 +984,8 @@ impl AgentControlService {
             fs::write(
                 agent_config_dir.join("routing.json"),
                 serde_json::to_string_pretty(&routing)?,
-            ).await?;
+            )
+            .await?;
 
             self.emit_agent_started(&internal_name)?;
 
@@ -1534,7 +1546,8 @@ impl AgentControlService {
                     if let Some(wid_str) = routing["window_id"].as_str() {
                         if let Ok(wid) = crate::services::tmux_ipc::WindowId::parse(wid_str) {
                             let tmux = self.tmux()?;
-                            match tokio::task::spawn_blocking(move || tmux.kill_window(&wid)).await {
+                            match tokio::task::spawn_blocking(move || tmux.kill_window(&wid)).await
+                            {
                                 Ok(Ok(())) => {
                                     info!(identifier, "Closed tmux window via stored window_id");
                                     window_closed = true;
@@ -1990,7 +2003,11 @@ impl AgentControlService {
                 flags
             }
             AgentType::Gemini => {
-                if yolo { " --yolo".to_string() } else { String::new() }
+                if yolo {
+                    " --yolo".to_string()
+                } else {
+                    String::new()
+                }
             }
             AgentType::Shoal => String::new(),
         };
@@ -2051,7 +2068,13 @@ impl AgentControlService {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating tmux window");
 
         let full_command = Self::build_agent_command(
-            agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags, self.yolo,
+            agent_type,
+            prompt,
+            fork_session_id,
+            &env_vars,
+            cwd,
+            claude_flags,
+            self.yolo,
         );
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let tmux = self.tmux()?;
@@ -2163,7 +2186,15 @@ impl AgentControlService {
     ) -> Result<super::tmux_ipc::PaneId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
 
-        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags, self.yolo);
+        let full_command = Self::build_agent_command(
+            agent_type,
+            prompt,
+            None,
+            &env_vars,
+            cwd,
+            claude_flags,
+            self.yolo,
+        );
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let tmux = self.tmux()?;
 
@@ -2175,10 +2206,16 @@ impl AgentControlService {
                 .await
                 .context("tokio task join error")?
                 .context("Failed to list tmux windows")?;
-            windows.iter()
+            windows
+                .iter()
                 .find(|w| w.window_name == wname)
                 .map(|w| w.window_id.clone())
-                .ok_or_else(|| anyhow::anyhow!("No tmux window found matching '{}' — cannot create pane", wname))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "No tmux window found matching '{}' — cannot create pane",
+                        wname
+                    )
+                })?
         } else {
             // Default to first window if no name provided
             let t = tmux.clone();
@@ -2186,9 +2223,15 @@ impl AgentControlService {
                 .await
                 .context("tokio task join error")?
                 .context("Failed to list tmux windows")?;
-            windows.first()
+            windows
+                .first()
                 .map(|w| w.window_id.clone())
-                .ok_or_else(|| anyhow!("No windows found in session {} — cannot create pane", tmux.session_name()))?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "No windows found in session {} — cannot create pane",
+                        tmux.session_name()
+                    )
+                })?
         };
 
         let pane_cwd = cwd.to_path_buf();

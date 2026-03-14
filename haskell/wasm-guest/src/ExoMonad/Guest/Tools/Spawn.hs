@@ -13,6 +13,7 @@ module ExoMonad.Guest.Tools.Spawn
 where
 
 import Control.Monad (forM, void)
+import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Maybe (fromMaybe)
 import Data.Aeson qualified as Aeson

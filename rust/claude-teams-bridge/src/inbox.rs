@@ -111,7 +111,13 @@ pub fn is_message_read(team: &str, recipient: &str, timestamp: &str) -> bool {
     match messages.iter().find(|m| m.timestamp == timestamp) {
         Some(m) => m.read,
         None => {
-            debug!(team, recipient, timestamp, total_messages = messages.len(), "is_message_read: message not found");
+            debug!(
+                team,
+                recipient,
+                timestamp,
+                total_messages = messages.len(),
+                "is_message_read: message not found"
+            );
             false
         }
     }

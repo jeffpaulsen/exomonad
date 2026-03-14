@@ -29,7 +29,10 @@ pub fn inbox_path(team: &str, recipient: &str) -> Option<PathBuf> {
 
 #[allow(dead_code)]
 pub(crate) fn inbox_dir_at(base: &Path, team: &str) -> PathBuf {
-    base.join(".claude").join("teams").join(team).join("inboxes")
+    base.join(".claude")
+        .join("teams")
+        .join(team)
+        .join("inboxes")
 }
 
 #[allow(dead_code)]
@@ -39,7 +42,10 @@ pub(crate) fn inbox_path_at(base: &Path, team: &str, recipient: &str) -> PathBuf
 
 #[allow(dead_code)]
 pub(crate) fn config_path_at(base: &Path, team: &str) -> PathBuf {
-    base.join(".claude").join("teams").join(team).join("config.json")
+    base.join(".claude")
+        .join("teams")
+        .join(team)
+        .join("config.json")
 }
 
 #[allow(dead_code)]

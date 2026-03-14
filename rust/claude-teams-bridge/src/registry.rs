@@ -65,10 +65,14 @@ mod tests {
     #[tokio::test]
     async fn test_register_then_get() {
         let reg = TeamRegistry::new();
-        reg.register("root", TeamInfo {
-            team_name: "exo-root".into(),
-            inbox_name: "root-inbox".into(),
-        }).await;
+        reg.register(
+            "root",
+            TeamInfo {
+                team_name: "exo-root".into(),
+                inbox_name: "root-inbox".into(),
+            },
+        )
+        .await;
         let result = reg.get("root").await.unwrap();
         assert_eq!(result.team_name, "exo-root");
         assert_eq!(result.inbox_name, "root-inbox");
@@ -77,8 +81,22 @@ mod tests {
     #[tokio::test]
     async fn test_register_overwrites() {
         let reg = TeamRegistry::new();
-        reg.register("root", TeamInfo { team_name: "team1".into(), inbox_name: "inbox1".into() }).await;
-        reg.register("root", TeamInfo { team_name: "team2".into(), inbox_name: "inbox2".into() }).await;
+        reg.register(
+            "root",
+            TeamInfo {
+                team_name: "team1".into(),
+                inbox_name: "inbox1".into(),
+            },
+        )
+        .await;
+        reg.register(
+            "root",
+            TeamInfo {
+                team_name: "team2".into(),
+                inbox_name: "inbox2".into(),
+            },
+        )
+        .await;
         let result = reg.get("root").await.unwrap();
         assert_eq!(result.team_name, "team2");
     }
@@ -92,8 +110,22 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_keys_coexist() {
         let reg = TeamRegistry::new();
-        reg.register("root", TeamInfo { team_name: "root-team".into(), inbox_name: "root-inbox".into() }).await;
-        reg.register("agent", TeamInfo { team_name: "agent-team".into(), inbox_name: "agent-inbox".into() }).await;
+        reg.register(
+            "root",
+            TeamInfo {
+                team_name: "root-team".into(),
+                inbox_name: "root-inbox".into(),
+            },
+        )
+        .await;
+        reg.register(
+            "agent",
+            TeamInfo {
+                team_name: "agent-team".into(),
+                inbox_name: "agent-inbox".into(),
+            },
+        )
+        .await;
         assert_eq!(reg.get("root").await.unwrap().team_name, "root-team");
         assert_eq!(reg.get("agent").await.unwrap().team_name, "agent-team");
     }

@@ -1,10 +1,10 @@
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
-use claude_teams_bridge::TeamRegistry;
-use claude_teams_bridge as teams_mailbox;
 use crate::services::tmux_events;
 use agent_client_protocol::{Agent, PromptRequest};
+use claude_teams_bridge as teams_mailbox;
+use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::events::{event, AgentMessage, Event};
 use tracing::{debug, info, warn};
 
@@ -375,7 +375,10 @@ pub async fn deliver_to_agent(
     // since agent_control writes routing under the slug, not the full branch name.
     // Try direct agent_key path first (for peer messaging where key is already
     // the directory name), then slug with all agent type suffixes.
-    let slug = agent_key.rsplit_once('.').map(|(_, s)| s).unwrap_or(agent_key);
+    let slug = agent_key
+        .rsplit_once('.')
+        .map(|(_, s)| s)
+        .unwrap_or(agent_key);
     let agents_dir = project_dir.join(".exo/agents");
     let routing_candidates = std::iter::once(agent_key.to_string()).chain(
         ["gemini", "claude", "shoal"].iter().flat_map(|suffix| {

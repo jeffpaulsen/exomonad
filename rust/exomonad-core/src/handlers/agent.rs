@@ -567,7 +567,9 @@ impl AgentEffects for AgentHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CloseSelfResponse> {
         let agent_key = ctx.agent_name.to_string();
-        let routing_path = std::path::Path::new(".exo/agents").join(&agent_key).join("routing.json");
+        let routing_path = std::path::Path::new(".exo/agents")
+            .join(&agent_key)
+            .join("routing.json");
 
         let pane_target = if let Ok(content) = std::fs::read_to_string(&routing_path) {
             serde_json::from_str::<serde_json::Value>(&content)

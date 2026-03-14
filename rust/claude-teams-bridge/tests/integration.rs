@@ -1,6 +1,6 @@
 use claude_teams_bridge::{
-    config_path, inbox_path, is_message_read, list_inboxes, list_teams, read_inbox,
-    write_to_inbox, TeamConfig, TeamMember, TeamsMessage,
+    config_path, inbox_path, is_message_read, list_inboxes, list_teams, read_inbox, write_to_inbox,
+    TeamConfig, TeamMember, TeamsMessage,
 };
 use serial_test::serial;
 use std::env;

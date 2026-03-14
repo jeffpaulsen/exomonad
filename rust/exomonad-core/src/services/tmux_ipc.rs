@@ -14,8 +14,9 @@ use tracing::{debug, info, warn};
 /// tmux target, preventing concurrent paste-buffer/send-keys interleaving.
 /// Per-target injection locks. Uses Weak references so entries are automatically
 /// reclaimable when no inject_input call holds the Arc.
-static INJECTION_LOCKS: std::sync::LazyLock<StdMutex<HashMap<String, std::sync::Weak<StdMutex<()>>>>> =
-    std::sync::LazyLock::new(|| StdMutex::new(HashMap::new()));
+static INJECTION_LOCKS: std::sync::LazyLock<
+    StdMutex<HashMap<String, std::sync::Weak<StdMutex<()>>>>,
+> = std::sync::LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 /// Stable tmux window identifier (@N format, base-index immune).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -120,8 +121,8 @@ impl TmuxIpc {
             );
         }
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let window_id = WindowId::parse(&raw)
-            .context("Failed to parse window_id from tmux new-session")?;
+        let window_id =
+            WindowId::parse(&raw).context("Failed to parse window_id from tmux new-session")?;
         info!(session = %name, window = %window_id, "Created tmux session");
         Ok(window_id)
     }
@@ -194,8 +195,8 @@ impl TmuxIpc {
             );
         }
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let window_id = WindowId::parse(&raw)
-            .context("Failed to parse window_id from tmux new-window")?;
+        let window_id =
+            WindowId::parse(&raw).context("Failed to parse window_id from tmux new-window")?;
         info!(session = %self.session_name, window = %window_id, name, "Created tmux window");
         Ok(window_id)
     }
@@ -315,8 +316,8 @@ impl TmuxIpc {
             );
         }
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let pane_id = PaneId::parse(&raw)
-            .context("Failed to parse pane_id from tmux split-window")?;
+        let pane_id =
+            PaneId::parse(&raw).context("Failed to parse pane_id from tmux split-window")?;
         info!(window = %window_id, pane = %pane_id, "Created tmux pane");
         Ok(pane_id)
     }
@@ -370,12 +371,20 @@ impl TmuxIpc {
                 });
             arc
         };
-        let _guard = target_lock.lock().expect("per-target injection lock poisoned");
+        let _guard = target_lock
+            .lock()
+            .expect("per-target injection lock poisoned");
 
         // Exit copy/scroll mode if active — copy mode intercepts input,
         // preventing paste-buffer from reaching the underlying process.
         let mode_output = std::process::Command::new("tmux")
-            .args(["display-message", "-p", "-t", &qualified_target, "#{pane_in_mode}"])
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                &qualified_target,
+                "#{pane_in_mode}",
+            ])
             .output();
         if let Ok(output) = mode_output {
             if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1" {
@@ -653,35 +662,40 @@ mod tests {
 
     #[test]
     fn test_injection_lock_serializes_same_target() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
 
         let counter = Arc::new(AtomicU32::new(0));
         let barrier = Arc::new(std::sync::Barrier::new(2));
 
-        let handles: Vec<_> = (0..2).map(|_| {
-            let counter = counter.clone();
-            let barrier = barrier.clone();
-            std::thread::spawn(move || {
-                barrier.wait();
-                let lock = {
-                    let mut map = INJECTION_LOCKS.lock().unwrap();
-                    map.retain(|_, weak| weak.strong_count() > 0);
-                    map.get("test-serialization-target")
-                        .and_then(|w| w.upgrade())
-                        .unwrap_or_else(|| {
-                            let arc = Arc::new(StdMutex::new(()));
-                            map.insert("test-serialization-target".to_string(), Arc::downgrade(&arc));
-                            arc
-                        })
-                };
-                let _guard = lock.lock().unwrap();
-                // Simulate work under lock
-                let val = counter.load(Ordering::SeqCst);
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                counter.store(val + 1, Ordering::SeqCst);
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let counter = counter.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let lock = {
+                        let mut map = INJECTION_LOCKS.lock().unwrap();
+                        map.retain(|_, weak| weak.strong_count() > 0);
+                        map.get("test-serialization-target")
+                            .and_then(|w| w.upgrade())
+                            .unwrap_or_else(|| {
+                                let arc = Arc::new(StdMutex::new(()));
+                                map.insert(
+                                    "test-serialization-target".to_string(),
+                                    Arc::downgrade(&arc),
+                                );
+                                arc
+                            })
+                    };
+                    let _guard = lock.lock().unwrap();
+                    // Simulate work under lock
+                    let val = counter.load(Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    counter.store(val + 1, Ordering::SeqCst);
+                })
             })
-        }).collect();
+            .collect();
 
         for h in handles {
             h.join().unwrap();
@@ -692,8 +706,8 @@ mod tests {
 
     #[test]
     fn test_injection_lock_different_targets_independent() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
 
         // Verify two different targets can be locked concurrently (no deadlock,
         // and both threads reach the barrier while holding their respective locks).
@@ -720,7 +734,10 @@ mod tests {
 
         h1.join().unwrap();
         h2.join().unwrap();
-        assert!(both_reached_barrier.load(Ordering::SeqCst), "Both threads should hold independent locks concurrently");
+        assert!(
+            both_reached_barrier.load(Ordering::SeqCst),
+            "Both threads should hold independent locks concurrently"
+        );
     }
 
     #[test]

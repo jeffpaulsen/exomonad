@@ -281,12 +281,21 @@ impl PluginManager {
                     let payload_bytes: Vec<u8> = serde_json::from_value(effect.payload)
                         .context("Failed to parse effect payload as byte array")?;
 
-                    tracing::info!(
-                        effect_type = %effect.effect_type,
-                        continuation_id = %continuation_id,
-                        payload_len = payload_bytes.len(),
-                        "Handling suspended effect"
-                    );
+                    if effect.effect_type.starts_with("log.") {
+                        tracing::debug!(
+                            effect_type = %effect.effect_type,
+                            continuation_id = %continuation_id,
+                            payload_len = payload_bytes.len(),
+                            "Handling suspended effect"
+                        );
+                    } else {
+                        tracing::info!(
+                            effect_type = %effect.effect_type,
+                            continuation_id = %continuation_id,
+                            payload_len = payload_bytes.len(),
+                            "Handling suspended effect"
+                        );
+                    }
 
                     // Dispatch effect — wrap result as EffectResponse protobuf
                     // (same wire format as yield_effect) so WASM can handle errors gracefully

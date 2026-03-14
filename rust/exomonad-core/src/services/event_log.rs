@@ -114,7 +114,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = EventLog::open(dir.path().to_path_buf()).unwrap();
 
-        log.append("a", "feature/bug", &serde_json::json!({})).unwrap();
+        log.append("a", "feature/bug", &serde_json::json!({}))
+            .unwrap();
         let path = dir.path().join("feature_bug.jsonl");
         assert!(path.exists());
     }

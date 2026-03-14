@@ -8,6 +8,7 @@ where
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff)
+import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log

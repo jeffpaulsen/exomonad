@@ -538,8 +538,7 @@ async fn handle_hook_inner(
                                         reason,
                                         timestamp: tmux_events::now_iso8601(),
                                     };
-                                if let Err(e) =
-                                    tmux_events::emit_event(&state.tmux_session, &event)
+                                if let Err(e) = tmux_events::emit_event(&state.tmux_session, &event)
                                 {
                                     warn!("Failed to emit stop_hook:blocked event: {}", e);
                                 }
@@ -738,9 +737,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     }
 
     // Validate tmux is available
-    let tmux_check = std::process::Command::new("tmux")
-        .arg("-V")
-        .output();
+    let tmux_check = std::process::Command::new("tmux").arg("-V").output();
     match tmux_check {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout);
@@ -835,7 +832,13 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     // Set EXOMONAD_TMUX_SESSION in the tmux session environment so all
     // windows/panes inherit it (used by tmux_events, agent_control, etc.)
     let set_env_output = std::process::Command::new("tmux")
-        .args(["set-environment", "-t", &session, "EXOMONAD_TMUX_SESSION", &session])
+        .args([
+            "set-environment",
+            "-t",
+            &session,
+            "EXOMONAD_TMUX_SESSION",
+            &session,
+        ])
         .output()
         .context("Failed to set EXOMONAD_TMUX_SESSION in tmux environment")?;
     if !set_env_output.status.success() {
@@ -860,7 +863,13 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     }
     let serve_cmd = format!("EXOMONAD_TMUX_SESSION={} exomonad serve", &session);
     let status = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", server_target.as_str(), &serve_cmd, "Enter"])
+        .args([
+            "send-keys",
+            "-t",
+            server_target.as_str(),
+            &serve_cmd,
+            "Enter",
+        ])
         .status()
         .context("Failed to run tmux send-keys")?;
     if !status.success() {
@@ -1176,8 +1185,7 @@ async fn main() -> Result<()> {
                 exomonad_core::services::validate_gh_cli().context("Failed to validate gh CLI")?;
             }
 
-            let team_registry =
-                Arc::new(claude_teams_bridge::TeamRegistry::new());
+            let team_registry = Arc::new(claude_teams_bridge::TeamRegistry::new());
             let acp_registry = Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
 
             let project_dir_for_services = project_dir.clone();

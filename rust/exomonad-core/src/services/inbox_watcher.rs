@@ -11,8 +11,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use claude_teams_bridge::{inbox_path, TeamsMessage};
 use super::tmux_events::inject_input;
+use claude_teams_bridge::{inbox_path, TeamsMessage};
 
 /// Per-member watch state.
 struct WatchState {
@@ -40,12 +40,7 @@ impl InboxWatcher {
     }
 
     /// Start watching a member's inbox. Spawns a tokio task polling every 500ms.
-    pub async fn watch_inbox(
-        &self,
-        team_name: String,
-        member_name: String,
-        tmux_target: String,
-    ) {
+    pub async fn watch_inbox(&self, team_name: String, member_name: String, tmux_target: String) {
         let mut watches = self.watches.lock().await;
         if watches.contains_key(&member_name) {
             return;
