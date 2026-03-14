@@ -2,3 +2,4 @@ default_role = "tl"
 project_dir = "."
 tmux_session = "EXOMONAD"
 port = 7433
+yolo = true
