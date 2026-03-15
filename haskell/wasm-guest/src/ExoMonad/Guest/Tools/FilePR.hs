@@ -8,7 +8,7 @@ module ExoMonad.Guest.Tools.FilePR
 where
 
 import Control.Monad (void)
-import Control.Monad.Freer (Eff, sendM)
+import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
@@ -20,6 +20,7 @@ import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
 import ExoMonad.Effects.FilePR (FilePRFilePr)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
+import ExoMonad.Guest.Lifecycle (DevPhase (..), setDevPhase)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
@@ -114,4 +115,5 @@ instance MCPTool FilePR where
             Log.emitEventRequestPayload = eventPayload,
             Log.emitEventRequestTimestamp = 0
           })
+        setDevPhase (DevPRFiled (fpoNumber output))
         pure $ successResult (Aeson.toJSON output)
