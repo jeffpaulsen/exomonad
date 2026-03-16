@@ -16,4 +16,5 @@ pub struct AppState {
     pub default_role: Role,
     pub worktree_base: PathBuf,
     pub event_log: Option<Arc<EventLog>>,
+    pub run_id: Arc<str>,
 }

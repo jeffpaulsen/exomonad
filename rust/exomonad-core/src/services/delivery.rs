@@ -70,7 +70,6 @@ pub async fn notify_parent_delivery(
     // 1. Log OTel event + JSONL
     tracing::info!(
         otel.name = "agent.notify_parent",
-        agent_id = %agent_id,
         parent = %parent_session_id,
         status = %status,
         source = %source,

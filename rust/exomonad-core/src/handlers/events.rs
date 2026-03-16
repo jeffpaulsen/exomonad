@@ -172,7 +172,6 @@ impl EventEffects for EventHandler {
         };
 
         tracing::info!(
-            agent_id = %agent_id_str,
             birth_branch = %birth_branch,
             parent_session_id = %parent_session_id,
             status = %req.status,
@@ -235,7 +234,6 @@ impl EventEffects for EventHandler {
 
         tracing::info!(
             otel.name = "agent.message_sent",
-            agent_id = %sender,
             recipient = %req.recipient,
             method = method_string,
             "[event] agent.message_sent"

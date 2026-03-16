@@ -4,8 +4,10 @@ use exomonad::config::Config;
 use anyhow::{Context, Result};
 use axum::{
     body::Bytes,
-    extract::{Path, Query, State},
-    response::IntoResponse,
+    extract::{Extension, Path, Query, State},
+    http::Request,
+    middleware::Next,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -20,7 +22,7 @@ use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, warn, Instrument};
 
 // ============================================================================
 // REST API Types
@@ -186,6 +188,49 @@ pub async fn resolve_agent_birth_branch(
     );
     Ok(BirthBranch::root()
         .context("Failed to resolve root birth branch")?)
+}
+
+// ============================================================================
+// Agent Identity Middleware
+// ============================================================================
+
+async fn agent_identity_middleware(
+    Path((role, name)): Path<(String, String)>,
+    State(state): State<AppState>,
+    mut request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let wasm_path = resolve_wasm_path_for_role(&state.wasm_dir, &role, &state.wasm_name)
+        .unwrap_or_else(|| state.wasm_path.clone());
+
+    let plugin_result = resolve_plugin(
+        &state.plugins,
+        &state.registry,
+        &state.worktree_base,
+        &name,
+        &wasm_path,
+    )
+    .await;
+
+    let parent = plugin_result
+        .as_ref()
+        .ok()
+        .and_then(|p| p.effect_context().birth_branch.parent())
+        .map(|p| p.to_string())
+        .unwrap_or_default();
+
+    if let Ok(ref plugin) = plugin_result {
+        request.extensions_mut().insert(plugin.clone());
+    }
+
+    let span = tracing::info_span!(
+        "agent_request",
+        agent_id = %name,
+        agent.role = %role,
+        agent.parent = %parent,
+        swarm.run_id = %state.run_id,
+    );
+    next.run(request).instrument(span).await
 }
 
 // ============================================================================
@@ -446,7 +491,7 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-#[instrument(skip_all, fields(hook = ?params.event, hook.type = %params.event, agent_id = tracing::field::Empty))]
+#[instrument(skip_all, fields(hook = ?params.event, hook.type = %params.event, agent_id = tracing::field::Empty, agent.parent = tracing::field::Empty))]
 pub async fn handle_hook_request(
     Query(params): Query<HookQueryParams>,
     State(state): State<HookState>,
@@ -454,6 +499,9 @@ pub async fn handle_hook_request(
 ) -> Json<HookEnvelope> {
     if let Some(ref id) = params.agent_id {
         tracing::Span::current().record("agent_id", id.as_str());
+    }
+    if let Some(ref sid) = params.session_id {
+        tracing::Span::current().record("agent.parent", sid.as_str());
     }
     match handle_hook_inner(&params, &state, &body).await {
         Ok(envelope) => Json(envelope),
@@ -468,36 +516,9 @@ pub async fn handle_hook_request(
 }
 
 pub async fn list_tools(
-    Path((role, name)): Path<(String, String)>,
-    State(state): State<AppState>,
+    Path((role, _name)): Path<(String, String)>,
+    Extension(plugin): Extension<Arc<PluginManager>>,
 ) -> impl IntoResponse {
-    let wasm_path_for_handler = resolve_wasm_path_for_role(
-        &state.wasm_dir,
-        &role,
-        &state.wasm_name,
-    )
-    .unwrap_or_else(|| state.wasm_path.clone());
-
-    let plugin = match resolve_plugin(
-        &state.plugins,
-        &state.registry,
-        &state.worktree_base,
-        &name,
-        &wasm_path_for_handler,
-    )
-    .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!(role = %role, name = %name, error = %e, "Failed to resolve plugin");
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-                .into_response();
-        }
-    };
-
     // Hot reload WASM if changed
     let _ = plugin.reload_if_changed().await;
 
@@ -508,7 +529,7 @@ pub async fn list_tools(
             Json(serde_json::json!({ "tools": tools })).into_response()
         }
         Err(e) => {
-            tracing::error!(role = %role, error = %e, "Tool discovery failed");
+            tracing::error!(error = %e, "Tool discovery failed");
             (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": e.to_string()})),
@@ -518,40 +539,13 @@ pub async fn list_tools(
     }
 }
 
-#[instrument(skip_all, fields(agent_id = %name, role = %role, tool = %body.name, tool.name = %body.name))]
 pub async fn call_tool(
     Path((role, name)): Path<(String, String)>,
     State(state): State<AppState>,
+    Extension(plugin): Extension<Arc<PluginManager>>,
     Json(body): Json<ToolCallRequest>,
 ) -> impl IntoResponse {
-    let wasm_path_for_handler = resolve_wasm_path_for_role(
-        &state.wasm_dir,
-        &role,
-        &state.wasm_name,
-    )
-    .unwrap_or_else(|| state.wasm_path.clone());
-
-    let plugin = match resolve_plugin(
-        &state.plugins,
-        &state.registry,
-        &state.worktree_base,
-        &name,
-        &wasm_path_for_handler,
-    )
-    .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!(role = %role, name = %name, error = %e, "Failed to resolve plugin");
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-                .into_response();
-        }
-    };
-
-    tracing::info!(tool = %body.name, role = %role, agent = %name, "Executing tool");
+    tracing::info!(tool = %body.name, "Executing tool");
 
     let input = exomonad_core::mcp::tools::MCPCallInput::new(
         role.clone(),
@@ -569,9 +563,7 @@ pub async fn call_tool(
             tracing::error!(tool = %body.name, error = %e, "WASM call failed");
             tracing::info!(
                 otel.name = "tool.called",
-                agent_id = %name,
                 tool_name = %body.name,
-                role = %role,
                 duration_ms = duration_ms,
                 success = false,
                 error = %e,
@@ -597,9 +589,7 @@ pub async fn call_tool(
 
     tracing::info!(
         otel.name = "tool.called",
-        agent_id = %name,
         tool_name = %body.name,
-        role = %role,
         duration_ms = duration_ms,
         success = output.success,
         error = ?output.error,
@@ -683,6 +673,20 @@ pub async fn run(config: &Config) -> Result<()> {
     } else {
         std::env::current_dir()?.join(&config.project_dir)
     };
+
+    // Generate or load swarm run_id (persists across server restarts, resets on init --recreate)
+    let run_id_path = project_dir.join(".exo/run_id");
+    let run_id: Arc<str> = match std::fs::read_to_string(&run_id_path) {
+        Ok(id) if !id.trim().is_empty() => id.trim().into(),
+        _ => {
+            let id = uuid::Uuid::new_v4().to_string();
+            let _ = std::fs::write(&run_id_path, &id);
+            info!(run_id = %id, path = %run_id_path.display(), "Generated new swarm run_id");
+            id.into()
+        }
+    };
+    // Set env so logging::init() picks it up as an OTel resource attribute in child processes
+    std::env::set_var("EXOMONAD_SWARM_RUN_ID", &*run_id);
 
     let role_name = config.role.to_string();
     let wasm_dir = config.wasm_dir.clone();
@@ -877,6 +881,7 @@ Run `exomonad recompile` first to build it.",
         default_role: config.role.clone(),
         worktree_base: worktree_base.clone(),
         event_log: event_log.clone(),
+        run_id: run_id.clone(),
     };
 
     let hook_state = HookState {
@@ -896,20 +901,22 @@ Run `exomonad recompile` first to build it.",
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let agent_routes = Router::new()
+        .route("/{role}/{name}/tools", get(list_tools))
+        .route("/{role}/{name}/tools/call", post(call_tool))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            agent_identity_middleware,
+        ))
+        .with_state(app_state.clone());
+
     let app = Router::new()
         .route("/health", get(health))
         .route(
             "/hook",
             post(handle_hook_request).with_state(hook_state),
         )
-        .route(
-            "/agents/{role}/{name}/tools",
-            get(list_tools),
-        )
-        .route(
-            "/agents/{role}/{name}/tools/call",
-            post(call_tool),
-        )
+        .nest("/agents", agent_routes)
         .route("/events", post(handle_events).with_state(event_queue))
         .route("/reload", post(reload))
         .route("/shutdown", post(shutdown_endpoint).with_state(shutdown_signal.clone()))

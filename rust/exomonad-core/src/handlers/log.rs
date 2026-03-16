@@ -152,7 +152,6 @@ impl LogEffects for LogHandler {
             otel.name = %req.event_type,
             event_type = %req.event_type,
             event_id = %event_id,
-            agent_id = %ctx.agent_name,
             payload = %payload_str,
             "[event]"
         );

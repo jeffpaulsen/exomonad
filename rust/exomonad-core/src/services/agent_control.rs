@@ -1926,6 +1926,15 @@ impl AgentControlService {
             env_vars.insert("EXOMONAD_TMUX_SESSION".to_string(), session.clone());
         }
 
+        // Propagate swarm run_id and parent agent identity for OTel resource attributes
+        if let Ok(v) = std::env::var("EXOMONAD_SWARM_RUN_ID") {
+            env_vars.insert("EXOMONAD_SWARM_RUN_ID".to_string(), v);
+        }
+        env_vars.insert(
+            "EXOMONAD_PARENT_AGENT".to_string(),
+            self.effective_birth_branch(None).to_string(),
+        );
+
         // Propagate W3C traceparent for cross-agent trace correlation
         {
             use tracing_opentelemetry::OpenTelemetrySpanExt;

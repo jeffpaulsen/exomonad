@@ -106,10 +106,17 @@ fn build_otel_provider(
         .with_endpoint(endpoint)
         .build()?;
 
-    let resource = Resource::new(vec![
+    let mut attrs = vec![
         KeyValue::new("service.name", service_name.to_string()),
         KeyValue::new("service.version", env!("CARGO_PKG_VERSION").to_string()),
-    ]);
+    ];
+    if let Ok(v) = std::env::var("EXOMONAD_SWARM_RUN_ID") {
+        attrs.push(KeyValue::new("swarm.run_id", v));
+    }
+    if let Ok(v) = std::env::var("EXOMONAD_PARENT_AGENT") {
+        attrs.push(KeyValue::new("agent.parent", v));
+    }
+    let resource = Resource::new(attrs);
 
     let provider = TracerProvider::builder()
         .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)

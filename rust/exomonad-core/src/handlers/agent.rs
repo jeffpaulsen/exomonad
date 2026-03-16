@@ -228,7 +228,6 @@ impl AgentEffects for AgentHandler {
 
         tracing::info!(
             otel.name = "agent.spawned",
-            agent_id = %ctx.agent_name.to_string(),
             child_agent = %agent_info.id,
             agent_type = %AgentType::try_from(agent_info.agent_type).map(|t| format!("{:?}", t)).unwrap_or_else(|_| "unknown".to_string()),
             branch = %agent_info.branch_name,
@@ -316,7 +315,6 @@ impl AgentEffects for AgentHandler {
 
         tracing::info!(
             otel.name = "agent.spawned",
-            agent_id = %ctx.agent_name.to_string(),
             child_agent = %agent_info.id,
             agent_type = %AgentType::try_from(agent_info.agent_type).map(|t| format!("{:?}", t)).unwrap_or_else(|_| "unknown".to_string()),
             branch = %agent_info.branch_name,
@@ -364,7 +362,6 @@ impl AgentEffects for AgentHandler {
 
         tracing::info!(
             otel.name = "agent.spawned",
-            agent_id = %ctx.agent_name.to_string(),
             child_agent = %agent_info.id,
             agent_type = %AgentType::try_from(agent_info.agent_type).map(|t| format!("{:?}", t)).unwrap_or_else(|_| "unknown".to_string()),
             branch = %agent_info.branch_name,
@@ -468,7 +465,6 @@ impl AgentEffects for AgentHandler {
 
         tracing::info!(
             otel.name = "agent.spawned",
-            agent_id = %ctx.agent_name.to_string(),
             child_agent = %agent_info.id,
             agent_type = %AgentType::try_from(agent_info.agent_type).map(|t| format!("{:?}", t)).unwrap_or_else(|_| "unknown".to_string()),
             branch = %agent_info.branch_name,

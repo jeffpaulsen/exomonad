@@ -55,7 +55,6 @@ impl MergePrEffects for MergePRHandler {
         if result.success {
             tracing::info!(
                 otel.name = "pr.merged",
-                agent_id = %ctx.agent_name.to_string(),
                 pr_number = pr_number.as_u64(),
                 strategy = %req.strategy,
                 git_fetched = result.git_fetched,
@@ -75,7 +74,6 @@ impl MergePrEffects for MergePRHandler {
         } else {
             tracing::info!(
                 otel.name = "pr.merge_failed",
-                agent_id = %ctx.agent_name.to_string(),
                 pr_number = pr_number.as_u64(),
                 error = %result.message,
                 "[event] pr.merge_failed"
