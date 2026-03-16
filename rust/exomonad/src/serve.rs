@@ -446,12 +446,15 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-#[instrument(skip_all, fields(hook = ?params.event, agent_id = ?params.agent_id))]
+#[instrument(skip_all, fields(hook = ?params.event, hook.type = %params.event, agent_id = tracing::field::Empty))]
 pub async fn handle_hook_request(
     Query(params): Query<HookQueryParams>,
     State(state): State<HookState>,
     body: String,
 ) -> Json<HookEnvelope> {
+    if let Some(ref id) = params.agent_id {
+        tracing::Span::current().record("agent_id", id.as_str());
+    }
     match handle_hook_inner(&params, &state, &body).await {
         Ok(envelope) => Json(envelope),
         Err(e) => {
@@ -515,7 +518,7 @@ pub async fn list_tools(
     }
 }
 
-#[instrument(skip_all, fields(agent_id = %name, role = %role, tool = %body.name))]
+#[instrument(skip_all, fields(agent_id = %name, role = %role, tool = %body.name, tool.name = %body.name))]
 pub async fn call_tool(
     Path((role, name)): Path<(String, String)>,
     State(state): State<AppState>,
