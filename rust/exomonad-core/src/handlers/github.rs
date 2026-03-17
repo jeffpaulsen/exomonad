@@ -360,6 +360,7 @@ mod tests {
         EffectContext {
             agent_name: AgentName::from("test"),
             birth_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
         }
     }
 

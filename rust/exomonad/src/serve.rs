@@ -99,9 +99,11 @@ pub async fn get_or_create_plugin(
     }
 
     // Slow path: create new per-agent plugin
+    let working_dir = exomonad_core::services::agent_control::resolve_working_dir(birth_branch.as_str());
     let ctx = exomonad_core::effects::EffectContext {
         agent_name: agent_name.clone(),
         birth_branch,
+        working_dir,
     };
     let p = Arc::new(
         PluginManager::from_file(wasm_path, registry.clone(), ctx)

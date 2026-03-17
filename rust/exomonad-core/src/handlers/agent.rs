@@ -391,7 +391,7 @@ impl AgentEffects for AgentHandler {
             .ok_or_else(|| EffectError::custom("agent_error", "ACP registry not configured"))?;
 
         // Resolve working directory from context
-        let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
+        let working_dir = ctx.working_dir.clone();
 
         // Generate MCP settings for the agent using stdio transport
         let agent_name = &req.name;

@@ -2,13 +2,22 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::git`.
 
-use super::working_dir_or_default;
-use crate::effects::{dispatch_git_effect, EffectResult, GitEffects, ResultExt};
+use crate::effects::{dispatch_git_effect, EffectContext, EffectResult, GitEffects, ResultExt};
 use crate::services::git::GitService;
 use async_trait::async_trait;
 use exomonad_proto::effects::git::*;
 use std::sync::Arc;
 use tracing::info;
+
+/// Resolve git working directory: use request value if non-empty and not ".",
+/// otherwise use the agent's pre-computed working directory from EffectContext.
+fn resolve_git_working_dir(req_working_dir: String, ctx: &EffectContext) -> String {
+    if req_working_dir.is_empty() || req_working_dir == "." {
+        ctx.working_dir.to_string_lossy().into_owned()
+    } else {
+        req_working_dir
+    }
+}
 
 /// Git effect handler.
 ///
@@ -32,9 +41,9 @@ impl GitEffects for GitHandler {
     async fn get_branch(
         &self,
         req: GetBranchRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetBranchResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         info!(working_dir = %working_dir, "[Git] get_branch starting");
 
         let branch = self
@@ -53,9 +62,9 @@ impl GitEffects for GitHandler {
     async fn get_status(
         &self,
         req: GetStatusRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetStatusResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         info!(working_dir = %working_dir, "[Git] get_status starting");
 
         let dirty_files = self
@@ -100,9 +109,9 @@ impl GitEffects for GitHandler {
     async fn get_commits(
         &self,
         req: GetCommitsRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetCommitsResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         let limit = if req.limit <= 0 { 10 } else { req.limit as u32 };
         info!(working_dir = %working_dir, limit, "[Git] get_commits starting");
 
@@ -137,9 +146,9 @@ impl GitEffects for GitHandler {
     async fn has_unpushed_commits(
         &self,
         req: HasUnpushedCommitsRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<HasUnpushedCommitsResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         info!(working_dir = %working_dir, "[Git] has_unpushed_commits starting");
 
         let count = self
@@ -158,9 +167,9 @@ impl GitEffects for GitHandler {
     async fn get_remote_url(
         &self,
         req: GetRemoteUrlRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetRemoteUrlResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         info!(working_dir = %working_dir, "[Git] get_remote_url starting");
 
         let url = self
@@ -176,9 +185,9 @@ impl GitEffects for GitHandler {
     async fn get_repo_info(
         &self,
         req: GetRepoInfoRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetRepoInfoResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         info!(working_dir = %working_dir, "[Git] get_repo_info starting");
 
         let info = self
@@ -204,9 +213,9 @@ impl GitEffects for GitHandler {
     async fn get_worktree(
         &self,
         req: GetWorktreeRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetWorktreeResponse> {
-        let working_dir = working_dir_or_default(req.working_dir);
+        let working_dir = resolve_git_working_dir(req.working_dir, ctx);
         info!(working_dir = %working_dir, "[Git] get_worktree starting");
 
         let info = self
@@ -244,6 +253,15 @@ fn parse_git_date(date: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+
+    fn test_ctx(branch: &str) -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from(branch),
+            working_dir: crate::services::agent_control::resolve_working_dir(branch),
+        }
+    }
 
     #[test]
     fn test_extract_email() {
@@ -252,5 +270,34 @@ mod tests {
             Some("john@example.com".to_string())
         );
         assert_eq!(extract_email("No Email"), None);
+    }
+
+    #[test]
+    fn test_resolve_git_working_dir_root_agent() {
+        let ctx = test_ctx("main");
+        assert_eq!(resolve_git_working_dir("".into(), &ctx), ".");
+        assert_eq!(resolve_git_working_dir(".".into(), &ctx), ".");
+    }
+
+    #[test]
+    fn test_resolve_git_working_dir_spawned_agent() {
+        let ctx = test_ctx("main.feature-a");
+        assert_eq!(
+            resolve_git_working_dir("".into(), &ctx),
+            ".exo/worktrees/feature-a/"
+        );
+        assert_eq!(
+            resolve_git_working_dir(".".into(), &ctx),
+            ".exo/worktrees/feature-a/"
+        );
+    }
+
+    #[test]
+    fn test_resolve_git_working_dir_explicit_override() {
+        let ctx = test_ctx("main.feature-a");
+        assert_eq!(
+            resolve_git_working_dir("/some/explicit/path".into(), &ctx),
+            "/some/explicit/path"
+        );
     }
 }

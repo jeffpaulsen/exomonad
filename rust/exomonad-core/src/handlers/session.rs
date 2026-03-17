@@ -160,6 +160,7 @@ mod tests {
         EffectContext {
             agent_name: AgentName::from("test"),
             birth_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
         }
     }
 
@@ -257,6 +258,7 @@ mod tests {
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
             birth_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
         };
 
         let req = RegisterTeamRequest {
@@ -280,6 +282,7 @@ mod tests {
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
             birth_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
         };
 
         let req = RegisterClaudeSessionRequest {

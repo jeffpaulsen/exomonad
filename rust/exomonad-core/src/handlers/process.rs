@@ -56,7 +56,7 @@ impl ProcessEffects for ProcessHandler {
 
         Self::validate_working_dir(&req.working_dir)?;
 
-        let agent_root = crate::services::agent_control::resolve_agent_working_dir(ctx);
+        let agent_root = ctx.working_dir.clone();
         let resolved_dir = agent_root.join(&req.working_dir);
 
         tracing::info!(
@@ -126,6 +126,7 @@ mod tests {
         EffectContext {
             agent_name: AgentName::from("test"),
             birth_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
         }
     }
 

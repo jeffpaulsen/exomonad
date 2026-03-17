@@ -30,7 +30,7 @@ Handles effects in the `process.*` namespace, providing ad-hoc process execution
 ### Design
 
 - No service layer — `tokio::process::Command` is simple enough to inline
-- Working dir resolution reuses `resolve_agent_working_dir()` from `services::agent_control`
+- Working dir resolved from `ctx.working_dir` (pre-computed in `EffectContext` at construction)
 - Timeout via `tokio::time::timeout` wrapping `.output()`
 - No command allowlist — trusts WASM author
 
@@ -67,7 +67,27 @@ Handles effects in the `session.*` namespace.
 - **`register_claude_id`**: Registers a mapping between a session's unique ID and its Claude Code session UUID.
   - This is called by the `SessionStart` hook handler in WASM.
   - The ID is stored in the `ClaudeSessionRegistry` (keyed by `AgentName`, not raw strings).
-  - Used by `spawn_subtree` to resolve the parent's Claude session ID when spawning children with `--resume --fork-session`.
+  - Used by `fork_wave` to resolve the parent's Claude session ID when spawning children with `--resume --fork-session`.
+- **`register_team`**: Registers agent's Claude Teams membership in `TeamRegistry`. Called by PostToolUse hook after `TeamCreate`. Stores under agent_name, birth_branch, and slug variant keys.
+- **`deregister_team`**: Removes agent's Teams membership from `TeamRegistry`. Called by PostToolUse hook after `TeamDelete`. Mirrors `register_team` — removes all 3 key variants.
+
+## TasksHandler (`handlers/tasks.rs`)
+
+Handles effects in the `tasks.*` namespace. Reads/writes Claude Code's native task JSON files at `~/.claude/tasks/{team_name}/`.
+
+### Capabilities
+
+- **`list_tasks`**: Scans team directory for `*.json` task files, parses, optionally filters by status, sorts by numeric ID.
+- **`get_task`**: Reads a single task by ID. Returns `found=false` for missing tasks.
+- **`update_task`**: Merge-updates non-empty fields (status, owner, activeForm) via atomic write (NamedTempFile + persist). Structural fields (subject, description, blocks, blockedBy) are preserved.
+
+### Team Resolution
+
+Team name is resolved at call time (not configured at construction):
+1. Request `team_name` field (if non-empty, used directly)
+2. `TeamRegistry.get(agent_name)` — matches TL itself
+3. `TeamRegistry.get(birth_branch)` — matches workers (shared branch)
+4. `TeamRegistry.get(birth_branch.parent())` — matches dev/subtree agents
 
 ## AgentHandler (`handlers/agent.rs`)
 
@@ -77,7 +97,7 @@ Handles effects in the `agent.*` namespace.
 
 - **`spawn_gemini_teammate`**: Spawns a Gemini worker pane in the parent directory.
 - **`spawn_subtree`**: Creates a Claude subtree in a new git worktree + tmux window.
-- **`spawn_leaf_subtree`**: Creates a Gemini leaf in a new git worktree + tmux window.
+- **`spawn_leaf_subtree`**: Creates a Gemini leaf in a new git worktree + tmux window (used by `spawn_gemini` worktree/standalone modes).
 - **`cleanup_merged`**: Removes worktrees for merged branches.
 
 ### Type Safety
@@ -97,7 +117,7 @@ Handles effects in the `file_pr.*` namespace.
 
 ### Working Directory Resolution
 
-The handler derives the agent's working directory from `EffectContext` via `resolve_agent_working_dir()`:
+The handler reads `ctx.working_dir` (pre-computed in `EffectContext` at construction):
 - Root agents (birth_branch without dots): server CWD (project root)
 - Spawned agents (birth_branch with dots, e.g. `main.feature.scaffold`): `.exo/worktrees/{slug}/`
 

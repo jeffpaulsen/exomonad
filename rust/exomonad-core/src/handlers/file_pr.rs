@@ -64,7 +64,7 @@ impl FilePrEffects for FilePRHandler {
         tracing::info!(title = %req.title, "[FilePR] file_pr starting");
         let base_branch = non_empty(req.base_branch);
 
-        let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
+        let working_dir = ctx.working_dir.clone();
 
         let input = FilePRInput {
             title: req.title,
@@ -139,6 +139,7 @@ mod tests {
         EffectContext {
             agent_name: AgentName::from("test"),
             birth_branch: BirthBranch::from(branch),
+            working_dir: crate::services::agent_control::resolve_working_dir(branch),
         }
     }
 
@@ -152,14 +153,14 @@ mod tests {
     #[test]
     fn test_resolve_working_dir_root() {
         let ctx = test_ctx("main");
-        let working_dir = crate::services::agent_control::resolve_agent_working_dir(&ctx);
+        let working_dir = ctx.working_dir.clone();
         assert_eq!(working_dir, PathBuf::from("."));
     }
 
     #[test]
     fn test_resolve_working_dir_spawned() {
         let ctx = test_ctx("main.feature");
-        let working_dir = crate::services::agent_control::resolve_agent_working_dir(&ctx);
+        let working_dir = ctx.working_dir.clone();
         assert_eq!(working_dir, PathBuf::from(".exo/worktrees/feature/"));
     }
 }

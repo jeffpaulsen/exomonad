@@ -51,15 +51,19 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use std::path::PathBuf;
+
 use crate::domain::{AgentName, BirthBranch};
 
 /// Identity context for effect handlers, baked into the PluginManager at construction.
 ///
 /// Always present — the plugin can't exist without it. No Option, no Mutex, no panic path.
+/// `working_dir` is computed once from `birth_branch` at construction — handlers read it directly.
 #[derive(Debug, Clone)]
 pub struct EffectContext {
     pub agent_name: AgentName,
     pub birth_branch: BirthBranch,
+    pub working_dir: PathBuf,
 }
 
 /// Result type for effect handlers.
@@ -234,6 +238,7 @@ mod tests {
         EffectContext {
             agent_name: crate::domain::AgentName::from("test"),
             birth_branch: crate::domain::BirthBranch::from("test-branch"),
+            working_dir: std::path::PathBuf::from("."),
         }
     }
 

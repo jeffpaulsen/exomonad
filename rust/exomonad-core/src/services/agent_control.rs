@@ -160,15 +160,6 @@ impl AgentType {
 /// Root agent (no dots in birth_branch): "TL" tab (created by `exomonad init`).
 /// Spawned subtree: "{emoji} {slug}" where slug = last segment of birth_branch.
 /// Used for routing popup requests to the correct plugin instance.
-/// Resolve the working directory for an agent from its EffectContext.
-///
-/// Root agents (birth_branch without dots) work in the project root.
-/// Spawned agents (birth_branch with dots, e.g. "main.feature.scaffold")
-/// work in `.exo/worktrees/{slug}/` where slug is the last dot-segment.
-pub fn resolve_agent_working_dir(ctx: &crate::effects::EffectContext) -> PathBuf {
-    resolve_working_dir(ctx.birth_branch.as_str())
-}
-
 /// Resolve the working directory for an agent from its birth branch.
 ///
 /// Follows the dot-segment hierarchy: "main.feature-a" -> ".exo/worktrees/feature-a/".
@@ -1129,7 +1120,7 @@ impl AgentControlService {
 
             // Resolve caller's context (tab and worktree) from its context.
             let caller_tab = resolve_own_tab_name(ctx);
-            let caller_worktree = resolve_agent_working_dir(ctx);
+            let caller_worktree = ctx.working_dir.clone();
             let absolute_worktree = self.project_dir.join(caller_worktree);
 
             // Write routing info so send_message can target this pane correctly.
@@ -1196,8 +1187,8 @@ impl AgentControlService {
             // Depth check using typed birth-branch.
             let depth = effective_birth.depth();
 
-            if depth >= 2 {
-                return Err(anyhow!("Subtree depth limit reached (max 2). Current birth-branch: {}, depth: {}", effective_birth, depth));
+            if depth >= 3 {
+                return Err(anyhow!("Subtree depth limit reached (max 3). Current birth-branch: {}, depth: {}", effective_birth, depth));
             }
 
             let effective_project_dir = &self.project_dir;

@@ -241,9 +241,12 @@ impl RuntimeBuilder {
 
         // Root plugin uses "root" identity. Per-agent plugins are created
         // separately in the serve command with baked-in per-agent identity.
+        let root_birth_branch = BirthBranch::root()?;
+        let root_working_dir = crate::services::agent_control::resolve_working_dir(root_birth_branch.as_str());
         let root_ctx = EffectContext {
             agent_name: AgentName::from("root"),
-            birth_branch: BirthBranch::root()?,
+            birth_branch: root_birth_branch,
+            working_dir: root_working_dir,
         };
 
         let plugin_manager = if let Some(path) = self.wasm_path {

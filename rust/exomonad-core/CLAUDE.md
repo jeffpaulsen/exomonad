@@ -27,7 +27,7 @@ Without `runtime`: only `ui_protocol` module available (agent event types, telem
 |------|---------|
 | `EffectHandler` | Trait for implementing namespace-based effect handlers |
 | `EffectRegistry` | Registry for dispatching effects by namespace |
-| `EffectContext` | Identity context (agent name, birth branch) passed to all handlers |
+| `EffectContext` | Identity context (agent name, birth branch, working dir) passed to all handlers |
 | `EffectError` | Common error type for all effects with protobuf mapping |
 | `PluginManager` | Manages WASM guest calls and host function dispatch via Extism |
 | `RuntimeBuilder` | Fluent API for assembling handlers and loading WASM |
