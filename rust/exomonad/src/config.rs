@@ -64,7 +64,6 @@ pub struct RawConfig {
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
-
 }
 
 /// Final resolved configuration.

@@ -199,16 +199,14 @@ What you can do with exomonad right now, end-to-end.
 Spawn heterogeneous agent teams as a recursive tree:
 
 - **`fork_wave`** — Fork N parallel Claude agents, each in its own worktree. Optionally inherit context via `fork_session: true` per child. Requires clean git state (committed and pushed).
-- **`spawn_gemini`** — Unified Gemini spawn tool with three isolation modes:
-  - `isolation: "worktree"` — Own branch + directory, files PR when done
-  - `isolation: "inline"` — Ephemeral pane in parent directory, no branch/PR
-  - `isolation: "standalone"` — Own git repo for full filesystem isolation
+- **`spawn_gemini`** — Spawn Gemini agent in own worktree+branch. Files PR when done. Structured spec fields (steps, verify, boundary, context, read_first).
+- **`spawn_worker`** — Spawn ephemeral Gemini worker in tmux pane. No branch, no PR. Just name + task.
 
 **Agent Types:** `Claude` (🤖), `Gemini` (💎), `Shoal` (🌊). Shoal is for custom binary agents that connect via rmcp MCP client and receive notifications via HTTP-over-Unix-domain-socket at `.exo/agents/{name}/notify.sock`.
 
 **Multi-WASM:** The server loads multiple WASM modules from `.exo/wasm/`. Convention: if `wasm-guest-{role}.wasm` exists, it's used for that role; otherwise falls back to `wasm-guest-{wasm_name}.wasm` (default). Drop a WASM file, it's available.
 
-**Standalone repo mode:** `spawn_gemini` with `isolation: "standalone"` creates a fresh `git init` repo instead of a worktree. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
+**Standalone repo mode:** Available via the lower-level `spawn_leaf_subtree` core function with `standalone_repo=true`. Creates a fresh `git init` repo instead of a worktree. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
 
 **Branch naming:** `{parent_branch}.{slug}` (dot separator). PRs target parent branch, not main — merged via recursive fold up the tree.
 
@@ -298,7 +296,7 @@ Without Tempo running, spans still appear in stderr via the tracing fmt layer.
 ```
 Human in tmux session
     └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (fork_wave, spawn_gemini, etc.)
+            ├── MCP tools via WASM (fork_wave, spawn_gemini, spawn_worker, etc.)
             └── Agent tree:
                 ├── worktree: main.feature-a (TL role, can spawn children)
                 │   ├── worker: rust-impl (Gemini, in-place pane)
@@ -370,7 +368,8 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | Tool | Role | Description |
 |------|------|-------------|
 | `fork_wave` | root, tl | Fork N parallel Claude agents, each in its own worktree. Per-child `fork_session` for context inheritance. |
-| `spawn_gemini` | root, tl | Spawn Gemini agent with isolation mode: worktree (branch+PR), inline (ephemeral pane), or standalone (own repo). |
+| `spawn_gemini` | root, tl | Spawn Gemini agent in own worktree+branch. Structured spec fields: steps, verify, boundary, context, read_first. |
+| `spawn_worker` | root, tl | Spawn ephemeral Gemini worker in tmux pane (no branch, no PR). Just name + task. |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
 | `merge_pr` | root, tl | Merge child PR (gh merge + git fetch) |
 | `notify_parent` | tl, dev, worker | Send message to parent agent. Auto-routed via Teams inbox (primary) or tmux STDIN (fallback) |
@@ -534,7 +533,8 @@ The recursive execution pattern. Every TL at every level follows this protocol:
 
 2. **Fork** — Spawn wave N children. Zero deps between siblings in the same wave.
    - Sub-TLs: `fork_wave` (Claude, `fork_session: true` for context inheritance) — they already know the plan
-   - Devs: `spawn_gemini` with `isolation: "worktree"` (Gemini, spec-only) — they get CLAUDE.md from scaffolding
+   - Devs: `spawn_gemini` (Gemini, worktree+PR) — they get CLAUDE.md from scaffolding
+   - Workers: `spawn_worker` (Gemini, ephemeral pane) — research or non-conflicting edits
 
 3. **Converge** — Wait for child notifications. Merge their PRs. Write an integration commit:
    - Wire children's outputs together

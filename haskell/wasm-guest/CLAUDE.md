@@ -28,12 +28,10 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 
 - **`fork_wave`**: Fork N parallel Claude agents, each in its own worktree. Per-child `fork_session` for context inheritance (default: false). Requires clean git state.
-- **`spawn_gemini`**: Unified Gemini spawn with three isolation modes:
-  - `isolation: "worktree"` — Own branch + directory, files PR (dev role)
-  - `isolation: "inline"` — Ephemeral pane in parent directory, no branch/PR
-  - `isolation: "standalone"` — Own git repo for full filesystem isolation
+- **`spawn_gemini`**: Spawn Gemini agent in own worktree+branch. Files PR when done. Structured spec fields: steps, verify, boundary, context, read_first.
+- **`spawn_worker`**: Spawn ephemeral Gemini worker in tmux pane. No branch, no PR. Just name + task.
 - **`spawn_leaf_subtree`** (SDK core): Lower-level worktree/standalone spawn used by `spawn_gemini`.
-- **`spawn_workers`** (SDK core): Lower-level inline pane spawn used by `spawn_gemini`.
+- **`spawn_workers`** (SDK core): Lower-level batch inline pane spawn used by `spawn_worker`.
 
 ### Task Tools (`ExoMonad.Guest.Tools.Tasks`)
 
@@ -83,7 +81,7 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 | `Tools.FilePR` | `filePRCore`, `filePRDescription`, `filePRSchema`, `FilePRArgs`, `FilePROutput` | `DevFilePR`, `TLFilePR` |
 | `Tools.Events` | `notifyParentCore`, `shutdownCore`, descriptions/schemas, `MCPTool SendMessage` | `DevNotifyParent`, `TLNotifyParent`, `WorkerNotifyParent`, `DevShutdown`, `WorkerShutdown` |
 | `Tools.MergePR` | `mergePRCore`, `mergePRRender`, description/schema, `extractSlug` | `TLMergePR` |
-| `Tools.Spawn` | `forkWaveCore`, `spawnGeminiCore`, `spawnLeafSubtreeCore`, `spawnWorkersCore`, descriptions/schemas, render functions | `TLForkWave`, `TLSpawnGemini`, `RootForkWave`, `RootSpawnGemini` |
+| `Tools.Spawn` | `forkWaveCore`, `spawnGeminiCore`, `spawnWorkerToolCore`, `spawnLeafSubtreeCore`, `spawnWorkersCore`, descriptions/schemas, render functions | `TLForkWave`, `TLSpawnGemini`, `TLSpawnWorker`, `RootForkWave`, `RootSpawnGemini`, `RootSpawnWorker` |
 | `Tools.Tasks` | `taskListCore`, `taskGetCore`, `taskUpdateCore`, descriptions/schemas | `DevTaskList`, `DevTaskGet`, `DevTaskUpdate`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` |
 
 `SendMessage` is the only tool with an `MCPTool` instance in the SDK (no state transitions needed).
@@ -92,10 +90,10 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 
 | Role | Tools | State Machine | Spawned by |
 |------|-------|---------------|------------|
-| **root** | `RootForkWave`, `RootSpawnGemini`, `RootMergePR`, `SendMessage` | `TLPhase` (tracks children via `ChildSpawned`/`ChildCompleted`) | `exomonad init` (human-facing TL) |
-| **tl** | `TLForkWave`, `TLSpawnGemini`, `TLMergePR`, `TLFilePR`, `TLNotifyParent`, `SendMessage` | `TLPhase` | `fork_wave` |
-| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown`, `DevTaskList`, `DevTaskGet`, `DevTaskUpdate` | `DevPhase` (tracks PR lifecycle) | `spawn_gemini` (worktree/standalone) |
-| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` | None (ephemeral) | `spawn_gemini` (inline) |
+| **root** | `RootForkWave`, `RootSpawnGemini`, `RootSpawnWorker`, `RootMergePR`, `SendMessage` | `TLPhase` (tracks children via `ChildSpawned`/`ChildCompleted`) | `exomonad init` (human-facing TL) |
+| **tl** | `TLForkWave`, `TLSpawnGemini`, `TLSpawnWorker`, `TLMergePR`, `TLFilePR`, `TLNotifyParent`, `SendMessage` | `TLPhase` | `fork_wave` |
+| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown`, `DevTaskList`, `DevTaskGet`, `DevTaskUpdate` | `DevPhase` (tracks PR lifecycle) | `spawn_gemini` (worktree) |
+| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` | None (ephemeral) | `spawn_worker` |
 
 ## Hooks
 

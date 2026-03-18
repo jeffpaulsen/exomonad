@@ -9,14 +9,13 @@
 module RootRole (config, Tools) where
 
 import Control.Monad (void, forM_, when)
-import Control.Monad.Freer (Eff)
-import Data.Aeson (object, (.=))
 import ExoMonad
 import ExoMonad.Guest.StateMachine (applyEvent)
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
-    spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, spawnLeafRender, SpawnGeminiArgs (..)
+    spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, spawnLeafRender, SpawnGeminiArgs (..),
+    spawnWorkerToolCore, spawnWorkerToolDescription, spawnWorkerToolSchema, SpawnWorkerToolArgs
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
 import ExoMonad.Guest.Types (allowResponse)
@@ -51,12 +50,18 @@ instance MCPTool RootSpawnGemini where
     result <- spawnGeminiCore args
     case result of
       Left err -> pure $ errorResult err
-      Right (Just (slug, sr)) -> do
+      Right (slug, sr) -> do
         let handle = ChildHandle { chSlug = slug, chBranch = branchName sr, chAgentType = agentTypeResult sr }
         void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
         pure $ spawnLeafRender (Right (slug, sr))
-      Right Nothing ->
-        pure $ successResult $ object ["spawned" .= True]
+
+data RootSpawnWorker
+instance MCPTool RootSpawnWorker where
+  type ToolArgs RootSpawnWorker = SpawnWorkerToolArgs
+  toolName = "spawn_worker"
+  toolDescription = spawnWorkerToolDescription
+  toolSchema = spawnWorkerToolSchema
+  toolHandlerEff args = spawnWorkerToolCore args
 
 data RootMergePR
 instance MCPTool RootMergePR where
@@ -78,6 +83,7 @@ instance MCPTool RootMergePR where
 data Tools mode = Tools
   { forkWave    :: mode :- RootForkWave,
     spawnGemini :: mode :- RootSpawnGemini,
+    spawnWorker :: mode :- RootSpawnWorker,
     mergePr     :: mode :- RootMergePR,
     sendMessage :: mode :- SendMessage
   }
@@ -90,6 +96,7 @@ config =
       tools = Tools
         { forkWave    = mkHandler @RootForkWave,
           spawnGemini = mkHandler @RootSpawnGemini,
+          spawnWorker = mkHandler @RootSpawnWorker,
           mergePr     = mkHandler @RootMergePR,
           sendMessage = mkHandler @SendMessage
         },

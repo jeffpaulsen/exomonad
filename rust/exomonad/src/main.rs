@@ -8,9 +8,9 @@
 
 mod app_state;
 mod init;
-mod new;
 mod logging;
 mod mcp_stdio;
+mod new;
 mod serve;
 mod uds_client;
 
@@ -132,10 +132,7 @@ async fn main() -> Result<()> {
 
     let agent_id = std::env::var("EXOMONAD_AGENT_ID").unwrap_or_else(|_| "root".to_string());
     let service_name = format!("exomonad/{}", agent_id);
-    let _guard = logging::init(
-        config.otlp_endpoint.as_deref(),
-        &service_name,
-    );
+    let _guard = logging::init(config.otlp_endpoint.as_deref(), &service_name);
 
     match cli.command {
         Commands::McpStdio { ref role, ref name } => {
@@ -149,7 +146,12 @@ async fn main() -> Result<()> {
             } else {
                 std::env::current_dir()?.join(&config.project_dir)
             };
-            return exomonad::recompile::run_recompile(role_str, &project_dir, config.flake_ref.as_deref()).await;
+            return exomonad::recompile::run_recompile(
+                role_str,
+                &project_dir,
+                config.flake_ref.as_deref(),
+            )
+            .await;
         }
 
         Commands::Serve => {
@@ -172,7 +174,8 @@ async fn main() -> Result<()> {
             use std::io::Read;
             std::io::stdin().read_to_string(&mut body)?;
 
-            let is_root_session_start = event == HookEventType::SessionStart && std::env::var("EXOMONAD_AGENT_ID").is_err();
+            let is_root_session_start =
+                event == HookEventType::SessionStart && std::env::var("EXOMONAD_AGENT_ID").is_err();
 
             let socket = if is_root_session_start {
                 let start = Instant::now();
@@ -211,7 +214,10 @@ async fn main() -> Result<()> {
                 }
             };
 
-            match client.post_json::<serde_json::Value, HookEnvelope>(&path, &json_body).await {
+            match client
+                .post_json::<serde_json::Value, HookEnvelope>(&path, &json_body)
+                .await
+            {
                 Ok(resp) => {
                     print!("{}", resp.stdout);
                     if resp.exit_code != 0 {
@@ -230,8 +236,13 @@ async fn main() -> Result<()> {
             new::run(name).await?;
         }
 
-        Commands::Reply { id, payload, cancel } => {
-            let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET").unwrap_or_else(|_| ".exo/sockets/control.sock".to_string());
+        Commands::Reply {
+            id,
+            payload,
+            cancel,
+        } => {
+            let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
+                .unwrap_or_else(|_| ".exo/sockets/control.sock".to_string());
             let mut stream = UnixStream::connect(&socket_path).await?;
 
             let parsed_payload = match payload {
@@ -252,7 +263,8 @@ async fn main() -> Result<()> {
         Commands::Reload => {
             let socket = uds_client::find_server_socket().context("Cannot find server socket.")?;
             let client = uds_client::ServerClient::new(socket);
-            let resp: serde_json::Value = client.post_json("/reload", &serde_json::json!({})).await?;
+            let resp: serde_json::Value =
+                client.post_json("/reload", &serde_json::json!({})).await?;
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
 
@@ -269,9 +281,16 @@ async fn main() -> Result<()> {
                             use nix::sys::signal;
                             use nix::unistd::Pid;
                             let alive = signal::kill(Pid::from_raw(pid as i32), None).is_ok();
-                            println!("PID: {} ({})", pid, if alive { "running" } else { "not running" });
+                            println!(
+                                "PID: {} ({})",
+                                pid,
+                                if alive { "running" } else { "not running" }
+                            );
                             if !alive {
-                                eprintln!("Warning: server process {} is not running. Stale socket?", pid);
+                                eprintln!(
+                                    "Warning: server process {} is not running. Stale socket?",
+                                    pid
+                                );
                             }
                         }
                     }
@@ -283,7 +302,13 @@ async fn main() -> Result<()> {
 
             let client = uds_client::ServerClient::new(socket);
             println!("Connecting...");
-            match client.post_json::<serde_json::Value, serde_json::Value>("/shutdown", &serde_json::json!({})).await {
+            match client
+                .post_json::<serde_json::Value, serde_json::Value>(
+                    "/shutdown",
+                    &serde_json::json!({}),
+                )
+                .await
+            {
                 Ok(resp) => println!("Server acknowledged shutdown: {}", resp),
                 Err(e) => eprintln!("Shutdown request failed: {}", e),
             }

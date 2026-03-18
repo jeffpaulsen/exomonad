@@ -22,8 +22,9 @@ import ExoMonad.Guest.Tools.Events
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
-    spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, SpawnGemini, SpawnGeminiArgs,
+    spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, SpawnGeminiArgs,
     spawnLeafRender,
+    spawnWorkerToolCore, spawnWorkerToolDescription, spawnWorkerToolSchema, SpawnWorkerToolArgs,
     spawnAcpCore, SpawnAcpArgs
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
@@ -91,7 +92,7 @@ instance MCPTool TLForkWave where
           void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
         pure $ forkWaveRender fwResult
 
--- | TL-specific spawn_gemini: worktree/standalone fire ChildSpawned; inline is ephemeral.
+-- | TL-specific spawn_gemini: worktree spawn fires ChildSpawned.
 data TLSpawnGemini
 
 instance MCPTool TLSpawnGemini where
@@ -103,7 +104,7 @@ instance MCPTool TLSpawnGemini where
     result <- spawnGeminiCore args
     case result of
       Left err -> pure $ errorResult err
-      Right (Just (slug, sr)) -> do
+      Right (slug, sr) -> do
         let handle = ChildHandle
               { chSlug = slug
               , chBranch = branchName sr
@@ -111,8 +112,16 @@ instance MCPTool TLSpawnGemini where
               }
         void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
         pure $ spawnLeafRender (Right (slug, sr))
-      Right Nothing ->
-        pure $ successResult $ object ["spawned" .= True]
+
+-- | TL-specific spawn_worker: ephemeral pane, no state transition.
+data TLSpawnWorker
+
+instance MCPTool TLSpawnWorker where
+  type ToolArgs TLSpawnWorker = SpawnWorkerToolArgs
+  toolName = "spawn_worker"
+  toolDescription = spawnWorkerToolDescription
+  toolSchema = spawnWorkerToolSchema
+  toolHandlerEff args = spawnWorkerToolCore args
 
 -- | TL notify_parent: thin wrapper, no phase transitions.
 data TLNotifyParent
@@ -131,6 +140,7 @@ instance MCPTool TLNotifyParent where
 data Tools mode = Tools
   { forkWave :: mode :- TLForkWave,
     spawnGemini :: mode :- TLSpawnGemini,
+    spawnWorker :: mode :- TLSpawnWorker,
     pr :: mode :- TLFilePR,
     mergePr :: mode :- TLMergePR,
     notifyParent :: mode :- TLNotifyParent,
@@ -146,6 +156,7 @@ config =
         Tools
           { forkWave = mkHandler @TLForkWave,
             spawnGemini = mkHandler @TLSpawnGemini,
+            spawnWorker = mkHandler @TLSpawnWorker,
             pr = mkHandler @TLFilePR,
             mergePr = mkHandler @TLMergePR,
             notifyParent = mkHandler @TLNotifyParent,

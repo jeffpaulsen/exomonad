@@ -38,9 +38,24 @@ pub fn init(otlp_endpoint: Option<&str>, service_name: &str) -> LoggingGuard {
         let (nb, g) = tracing_appender::non_blocking(appender);
         file_guard = Some(g);
         if use_json {
-            (None, Some(tracing_subscriber::fmt::layer().json().with_writer(nb).with_ansi(false)))
+            (
+                None,
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_writer(nb)
+                        .with_ansi(false),
+                ),
+            )
         } else {
-            (Some(tracing_subscriber::fmt::layer().with_writer(nb).with_ansi(false)), None)
+            (
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(nb)
+                        .with_ansi(false),
+                ),
+                None,
+            )
         }
     } else {
         (None, None)
@@ -48,9 +63,19 @@ pub fn init(otlp_endpoint: Option<&str>, service_name: &str) -> LoggingGuard {
 
     // Build stderr layer
     let (stderr_plain, stderr_json) = if use_json {
-        (None, Some(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr)))
+        (
+            None,
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_writer(std::io::stderr),
+            ),
+        )
     } else {
-        (Some(tracing_subscriber::fmt::layer().with_writer(std::io::stderr)), None)
+        (
+            Some(tracing_subscriber::fmt::layer().with_writer(std::io::stderr)),
+            None,
+        )
     };
 
     // Build OTel layer

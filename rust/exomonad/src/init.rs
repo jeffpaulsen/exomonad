@@ -1,6 +1,6 @@
-use exomonad::config::Config;
 use crate::uds_client;
 use anyhow::{Context, Result};
+use exomonad::config::Config;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -430,7 +430,10 @@ pub async fn wait_for_server_socket(project_dir: &Path) -> Result<()> {
     }
 
     if !socket_path.exists() {
-        anyhow::bail!("Server socket not found at {} after 30s.", socket_path.display());
+        anyhow::bail!(
+            "Server socket not found at {} after 30s.",
+            socket_path.display()
+        );
     }
 
     let client = uds_client::ServerClient::new(socket_path.to_path_buf());

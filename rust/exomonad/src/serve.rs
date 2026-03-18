@@ -99,7 +99,8 @@ pub async fn get_or_create_plugin(
     }
 
     // Slow path: create new per-agent plugin
-    let working_dir = exomonad_core::services::agent_control::resolve_working_dir(birth_branch.as_str());
+    let working_dir =
+        exomonad_core::services::agent_control::resolve_working_dir(birth_branch.as_str());
     let ctx = exomonad_core::effects::EffectContext {
         agent_name: agent_name.clone(),
         birth_branch,
@@ -188,8 +189,7 @@ pub async fn resolve_agent_birth_branch(
         agent = %agent_name,
         "Failed to resolve birth branch from worktree or config, falling back to root"
     );
-    Ok(BirthBranch::root()
-        .context("Failed to resolve root birth branch")?)
+    Ok(BirthBranch::root().context("Failed to resolve root birth branch")?)
 }
 
 // ============================================================================
@@ -336,10 +336,8 @@ pub async fn handle_hook_inner(
         serde_json::to_value(&hook_input).context("Failed to serialize hook input")?;
 
     // Resolve agent identity defaults (used for both injection and PluginManager)
-    let agent_name_for_hook =
-        AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
-    let birth_branch_for_hook =
-        BirthBranch::from(params.session_id.as_deref().unwrap_or("main"));
+    let agent_name_for_hook = AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
+    let birth_branch_for_hook = BirthBranch::from(params.session_id.as_deref().unwrap_or("main"));
 
     // Always inject identity into WASM input (hooks need it even when env vars aren't set)
     if let serde_json::Value::Object(ref mut map) = hook_input_value {
@@ -407,11 +405,15 @@ pub async fn handle_hook_inner(
                 "[event] hook.stop"
             );
             if let Some(ref log) = state.event_log {
-                let _ = log.append("hook.stop", agent_name_for_hook.as_str(), &serde_json::json!({
-                    "event_type": format!("{:?}", event_type),
-                    "decision": decision_str,
-                    "reason": internal_output.reason,
-                }));
+                let _ = log.append(
+                    "hook.stop",
+                    agent_name_for_hook.as_str(),
+                    &serde_json::json!({
+                        "event_type": format!("{:?}", event_type),
+                        "decision": decision_str,
+                        "reason": internal_output.reason,
+                    }),
+                );
             }
 
             // Emit StopHookBlocked tmux event
@@ -478,7 +480,7 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     // We need to resolve the root plugin for health
     let cache = state.plugins.read().await;
     let plugin = cache.get(&AgentName::from("root")).cloned();
-    
+
     let wasm_hash = if let Some(p) = plugin {
         p.content_hash()
     } else {
@@ -524,12 +526,8 @@ pub async fn list_tools(
     // Hot reload WASM if changed
     let _ = plugin.reload_if_changed().await;
 
-    match exomonad_core::mcp::tools::get_tool_definitions(&plugin, Some(&role))
-        .await
-    {
-        Ok(tools) => {
-            Json(serde_json::json!({ "tools": tools })).into_response()
-        }
+    match exomonad_core::mcp::tools::get_tool_definitions(&plugin, Some(&role)).await {
+        Ok(tools) => Json(serde_json::json!({ "tools": tools })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Tool discovery failed");
             (
@@ -556,7 +554,8 @@ pub async fn call_tool(
     );
 
     let start = std::time::Instant::now();
-    let result: Result<exomonad_core::mcp::tools::MCPCallOutput, anyhow::Error> = plugin.call("handle_mcp_call", &input).await;
+    let result: Result<exomonad_core::mcp::tools::MCPCallOutput, anyhow::Error> =
+        plugin.call("handle_mcp_call", &input).await;
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let output = match result {
@@ -572,13 +571,17 @@ pub async fn call_tool(
                 "[event] tool.called"
             );
             if let Some(ref log) = state.event_log {
-                let _ = log.append("tool.called", &name, &serde_json::json!({
-                    "tool_name": body.name,
-                    "role": role,
-                    "duration_ms": duration_ms,
-                    "success": false,
-                    "error": e.to_string(),
-                }));
+                let _ = log.append(
+                    "tool.called",
+                    &name,
+                    &serde_json::json!({
+                        "tool_name": body.name,
+                        "role": role,
+                        "duration_ms": duration_ms,
+                        "success": false,
+                        "error": e.to_string(),
+                    }),
+                );
             }
             return Json(serde_json::json!({
                 "success": false,
@@ -598,13 +601,17 @@ pub async fn call_tool(
         "[event] tool.called"
     );
     if let Some(ref log) = state.event_log {
-        let _ = log.append("tool.called", &name, &serde_json::json!({
-            "tool_name": body.name,
-            "role": role,
-            "duration_ms": duration_ms,
-            "success": output.success,
-            "error": output.error,
-        }));
+        let _ = log.append(
+            "tool.called",
+            &name,
+            &serde_json::json!({
+                "tool_name": body.name,
+                "role": role,
+                "duration_ms": duration_ms,
+                "success": output.success,
+                "error": output.error,
+            }),
+        );
     }
 
     Json(serde_json::json!({
@@ -646,7 +653,9 @@ pub async fn reload(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-pub async fn shutdown_endpoint(State(signal): State<Arc<tokio::sync::Notify>>) -> impl IntoResponse {
+pub async fn shutdown_endpoint(
+    State(signal): State<Arc<tokio::sync::Notify>>,
+) -> impl IntoResponse {
     info!("Shutdown requested via /shutdown endpoint");
     signal.notify_one();
     Json(serde_json::json!({"status": "ok"}))
@@ -695,8 +704,8 @@ pub async fn run(config: &Config) -> Result<()> {
     let wasm_name = config.wasm_name.clone();
 
     // Resolve default WASM (for root TL role and as fallback)
-    let wasm_path = resolve_wasm_path_for_role(&wasm_dir, &role_name, &wasm_name)
-        .ok_or_else(|| {
+    let wasm_path =
+        resolve_wasm_path_for_role(&wasm_dir, &role_name, &wasm_name).ok_or_else(|| {
             anyhow::anyhow!(
                 "WASM file not found in {}
 Run `exomonad recompile` first to build it.",
@@ -740,13 +749,12 @@ Run `exomonad recompile` first to build it.",
     };
 
     let project_dir_for_services = project_dir.clone();
-    let mut agent_control =
-        exomonad_core::services::agent_control::AgentControlService::new(
-            project_dir_for_services.clone(),
-            github.clone(),
-            git_wt.clone(),
-        )
-        .with_acp_registry(acp_registry.clone());
+    let mut agent_control = exomonad_core::services::agent_control::AgentControlService::new(
+        project_dir_for_services.clone(),
+        github.clone(),
+        git_wt.clone(),
+    )
+    .with_acp_registry(acp_registry.clone());
     let worktree_base = config.worktree_base.clone();
     agent_control = agent_control.with_worktree_base(worktree_base.clone());
     agent_control = agent_control.with_birth_branch(BirthBranch::root()?);
@@ -759,9 +767,8 @@ Run `exomonad recompile` first to build it.",
     let mutex_registry = Arc::new(exomonad_core::services::MutexRegistry::new());
     mutex_registry.spawn_expiry_task();
 
-    let claude_session_registry = Arc::new(
-        exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new(),
-    );
+    let claude_session_registry =
+        Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
 
     info!(
         wasm_path = %wasm_path.display(),
@@ -815,9 +822,8 @@ Run `exomonad recompile` first to build it.",
     let root_plugin = Arc::new(rt.plugin_manager);
 
     // Per-agent plugin cache — each agent gets its own PluginManager with baked-in identity
-    let plugins: Arc<
-        tokio::sync::RwLock<HashMap<AgentName, Arc<PluginManager>>>,
-    > = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+    let plugins: Arc<tokio::sync::RwLock<HashMap<AgentName, Arc<PluginManager>>>> =
+        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
     // Pre-populate with the root agent's plugin
     plugins
@@ -915,14 +921,14 @@ Run `exomonad recompile` first to build it.",
 
     let app = Router::new()
         .route("/health", get(health))
-        .route(
-            "/hook",
-            post(handle_hook_request).with_state(hook_state),
-        )
+        .route("/hook", post(handle_hook_request).with_state(hook_state))
         .nest("/agents", agent_routes)
         .route("/events", post(handle_events).with_state(event_queue))
         .route("/reload", post(reload))
-        .route("/shutdown", post(shutdown_endpoint).with_state(shutdown_signal.clone()))
+        .route(
+            "/shutdown",
+            post(shutdown_endpoint).with_state(shutdown_signal.clone()),
+        )
         .with_state(app_state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

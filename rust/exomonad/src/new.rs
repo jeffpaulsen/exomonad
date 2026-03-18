@@ -1,5 +1,5 @@
-use exomonad::config::Config;
 use anyhow::{Context, Result};
+use exomonad::config::Config;
 use std::path::PathBuf;
 use tracing::{info, warn};
 

@@ -335,7 +335,7 @@ mod binary {
                 worktree_path: "/worktrees/10".into(),
                 branch_name: "gh-10/feature".into(),
                 agent_type: 1,
-                role: 2,   // TL
+                role: 2, // TL
                 alive: false,
                 mux_window: String::new(),
                 error: String::new(),
