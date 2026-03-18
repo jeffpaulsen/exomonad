@@ -319,6 +319,20 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         );
     }
 
+    // Set terminal window title to project/session name
+    let _ = std::process::Command::new("tmux")
+        .args(["set-option", "-t", &session, "set-titles", "on"])
+        .output();
+    let _ = std::process::Command::new("tmux")
+        .args([
+            "set-option",
+            "-t",
+            &session,
+            "set-titles-string",
+            "#{session_name}:#{window_name}",
+        ])
+        .output();
+
     // 3. Setup windows
     let ipc = TmuxIpc::new(&session);
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
