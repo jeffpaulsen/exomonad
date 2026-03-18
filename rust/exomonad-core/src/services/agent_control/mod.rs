@@ -23,7 +23,7 @@ pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use tokio::fs;
 pub(crate) use tokio::process::Command;
 pub(crate) use tokio::time::{timeout, Duration};
-pub(crate) use tracing::{debug, info, warn, instrument};
+pub(crate) use tracing::{debug, info, instrument, warn};
 
 pub(crate) use super::acp_registry::AcpRegistry;
 pub(crate) use super::git_worktree::GitWorktreeService;
@@ -38,7 +38,11 @@ pub(crate) const TMUX_TIMEOUT: Duration = Duration::from_secs(30);
 /// Push the parent branch to the remote so child PRs can reference it as
 /// their base. Non-fatal: warns on failure (supports local/airgapped setups
 /// where no remote or non-GitHub remote is configured).
-pub(crate) async fn ensure_branch_pushed(git_wt: &Arc<GitWorktreeService>, branch: &str, project_dir: &Path) {
+pub(crate) async fn ensure_branch_pushed(
+    git_wt: &Arc<GitWorktreeService>,
+    branch: &str,
+    project_dir: &Path,
+) {
     info!(branch = %branch, "Pushing parent branch to remote");
     let git_wt = git_wt.clone();
     let dir = project_dir.to_path_buf();
@@ -384,7 +388,6 @@ pub struct AgentPrInfo {
 
 impl FFIBoundary for AgentPrInfo {}
 
-
 /// Workspace topology for an agent — how it relates to the project directory.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -537,15 +540,13 @@ impl AgentControlService {
     /// Callers pass the birth branch from EffectContext. Falls back to `self.birth_branch`
     /// if no override is provided.
     pub(crate) fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> BirthBranch {
-        override_bb
-            .cloned()
-            .unwrap_or_else(|| {
-                debug_assert!(
-                    self.birth_branch.as_str() != "unset",
-                    "birth_branch was never initialized via with_birth_branch()"
-                );
-                self.birth_branch.clone()
-            })
+        override_bb.cloned().unwrap_or_else(|| {
+            debug_assert!(
+                self.birth_branch.as_str() != "unset",
+                "birth_branch was never initialized via with_birth_branch()"
+            );
+            self.birth_branch.clone()
+        })
     }
 
     /// Common post-spawn bookkeeping.
@@ -633,7 +634,11 @@ impl AgentControlService {
     }
 
     /// Copy allowed directories into the agent's context.
-    pub(crate) async fn copy_allowed_dirs(&self, target_dir: &Path, allowed_dirs: &[String]) -> Result<()> {
+    pub(crate) async fn copy_allowed_dirs(
+        &self,
+        target_dir: &Path,
+        allowed_dirs: &[String],
+    ) -> Result<()> {
         if allowed_dirs.is_empty() {
             return Ok(());
         }

@@ -181,7 +181,9 @@ pub async fn file_pr_async(
         .context("Failed to get workspace bookmark")?
         .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
 
-    let base = BranchName::from(detect_base_branch(&head, input.base_branch.as_ref().map(|b| b.as_str())).as_str());
+    let base = BranchName::from(
+        detect_base_branch(&head, input.base_branch.as_ref().map(|b| b.as_str())).as_str(),
+    );
 
     info!("[FilePR] head={} base={} dir={}", head, base, dir);
 
@@ -404,7 +406,11 @@ mod tests {
 
         if let Err(ref e) = result {
             let err_msg = e.to_string();
-            assert!(err_msg.contains("push failed"), "Expected push failed error, got: {}", err_msg);
+            assert!(
+                err_msg.contains("push failed"),
+                "Expected push failed error, got: {}",
+                err_msg
+            );
         } else {
             panic!("Expected file_pr_async to fail on push, but it succeeded?!");
         }

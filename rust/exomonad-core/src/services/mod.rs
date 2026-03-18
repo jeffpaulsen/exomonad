@@ -25,12 +25,12 @@ pub mod synthetic_members;
 pub mod tmux_events;
 pub mod tmux_ipc;
 
-pub use self::event_log::EventLog;
 pub use self::acp_registry::AcpRegistry;
 pub use self::agent_control::{
     resolve_parent_tab_name, resolve_working_dir, resolve_worktree_from_tab, AgentControlService,
     AgentInfo, AgentType, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
+pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
 pub use self::git_worktree::GitWorktreeService;

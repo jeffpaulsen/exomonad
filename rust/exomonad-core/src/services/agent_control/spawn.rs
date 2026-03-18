@@ -122,8 +122,7 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id.as_str());
-            self.finalize_spawn(&internal_name, routing)
-                .await?;
+            self.finalize_spawn(&internal_name, routing).await?;
 
             self.emit_agent_started(&internal_name)?;
 
@@ -286,8 +285,7 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id.as_str());
-            self.finalize_spawn(&internal_name, routing)
-                .await?;
+            self.finalize_spawn(&internal_name, routing).await?;
 
             self.emit_agent_started(&internal_name)?;
 

@@ -169,7 +169,7 @@ impl EffectRegistry {
             ))
         })?;
 
-        tracing::Span::current().record("namespace", &namespace);
+        tracing::Span::current().record("namespace", namespace);
 
         let handler = self
             .handlers

@@ -53,10 +53,7 @@ async fn gc_tmp_dir(tmp_dir: &Path) {
         let Ok(meta) = entry.metadata().await else {
             continue;
         };
-        let is_old = meta
-            .modified()
-            .map(|m| m < cutoff)
-            .unwrap_or(false);
+        let is_old = meta.modified().map(|m| m < cutoff).unwrap_or(false);
         if is_old {
             if let Err(e) = tokio::fs::remove_file(entry.path()).await {
                 warn!(path = %entry.path().display(), error = %e, "Failed to GC tmp file");
@@ -153,12 +150,18 @@ mod tests {
 
     #[test]
     fn test_extract_label_markdown_h1() {
-        assert_eq!(extract_label("# Copilot Review\nSome details"), "Copilot Review");
+        assert_eq!(
+            extract_label("# Copilot Review\nSome details"),
+            "Copilot Review"
+        );
     }
 
     #[test]
     fn test_extract_label_markdown_h2() {
-        assert_eq!(extract_label("## Changes Requested\nFix this"), "Changes Requested");
+        assert_eq!(
+            extract_label("## Changes Requested\nFix this"),
+            "Changes Requested"
+        );
     }
 
     #[test]
@@ -168,7 +171,10 @@ mod tests {
 
     #[test]
     fn test_extract_label_plain_text() {
-        assert_eq!(extract_label("Some feedback here\nMore lines"), "Some feedback here");
+        assert_eq!(
+            extract_label("Some feedback here\nMore lines"),
+            "Some feedback here"
+        );
     }
 
     #[test]

@@ -11,9 +11,9 @@ use crate::services::event_log::EventLog;
 use crate::services::file_pr::{self, FilePRInput};
 use crate::services::git_worktree::GitWorktreeService;
 use async_trait::async_trait;
-use tracing::instrument;
 use exomonad_proto::effects::file_pr::*;
 use std::sync::Arc;
+use tracing::instrument;
 
 /// File PR effect handler.
 ///
@@ -105,7 +105,7 @@ impl FilePrEffects for FilePRHandler {
         if let Some(ref log) = self.event_log {
             if let Err(e) = log.append(
                 event_type,
-                &ctx.agent_name.to_string(),
+                ctx.agent_name.as_ref(),
                 &serde_json::json!({
                     "pr_number": output.pr_number.as_u64(),
                     "pr_url": output.pr_url,

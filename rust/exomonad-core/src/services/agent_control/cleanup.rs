@@ -34,7 +34,13 @@ impl AgentControlService {
             None => {
                 let at = AgentType::from_dir_name(identifier);
                 let suffix = format!("-{}", at.suffix());
-                (at, identifier.strip_suffix(&suffix).unwrap_or(identifier).to_string())
+                (
+                    at,
+                    identifier
+                        .strip_suffix(&suffix)
+                        .unwrap_or(identifier)
+                        .to_string(),
+                )
             }
         };
 

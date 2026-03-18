@@ -1,13 +1,13 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::fs;
-use std::io::Write;
+use crate::effects::{dispatch_tasks_effect, EffectResult, ResultExt, TasksEffects};
 use async_trait::async_trait;
-use tracing::info;
 use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::tasks::*;
-use crate::effects::{dispatch_tasks_effect, EffectResult, TasksEffects, ResultExt};
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
+use tracing::info;
 
 pub struct TasksHandler {
     tasks_dir: PathBuf,
@@ -22,7 +22,11 @@ impl TasksHandler {
         }
     }
 
-    async fn resolve_team(&self, ctx: &crate::effects::EffectContext, requested_team: &str) -> Option<String> {
+    async fn resolve_team(
+        &self,
+        ctx: &crate::effects::EffectContext,
+        requested_team: &str,
+    ) -> Option<String> {
         if !requested_team.is_empty() {
             return Some(requested_team.to_string());
         }
@@ -61,8 +65,12 @@ impl TasksEffects for TasksHandler {
         req: ListTasksRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListTasksResponse> {
-        let team_name = self.resolve_team(ctx, &req.team_name).await
-            .ok_or_else(|| crate::effects::EffectError::invalid_input("Could not resolve team name"))?;
+        let team_name = self
+            .resolve_team(ctx, &req.team_name)
+            .await
+            .ok_or_else(|| {
+                crate::effects::EffectError::invalid_input("Could not resolve team name")
+            })?;
 
         let team_dir = self.tasks_dir.join(&team_name);
         if !team_dir.exists() {
@@ -77,16 +85,37 @@ impl TasksEffects for TasksHandler {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
                 let content = fs::read_to_string(&path).effect_err("tasks")?;
-                let task_val: serde_json::Value = serde_json::from_str(&content).effect_err("tasks")?;
-                
+                let task_val: serde_json::Value =
+                    serde_json::from_str(&content).effect_err("tasks")?;
+
                 let task = Task {
                     id: task_val["id"].as_str().unwrap_or_default().to_string(),
                     subject: task_val["subject"].as_str().unwrap_or_default().to_string(),
-                    description: task_val["description"].as_str().unwrap_or_default().to_string(),
-                    active_form: task_val["activeForm"].as_str().unwrap_or_default().to_string(),
+                    description: task_val["description"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    active_form: task_val["activeForm"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
                     status: task_val["status"].as_str().unwrap_or_default().to_string(),
-                    blocks: task_val["blocks"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
-                    blocked_by: task_val["blockedBy"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
+                    blocks: task_val["blocks"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    blocked_by: task_val["blockedBy"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     owner: task_val["owner"].as_str().unwrap_or_default().to_string(),
                 };
 
@@ -111,12 +140,22 @@ impl TasksEffects for TasksHandler {
         req: GetTaskRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetTaskResponse> {
-        let team_name = self.resolve_team(ctx, &req.team_name).await
-            .ok_or_else(|| crate::effects::EffectError::invalid_input("Could not resolve team name"))?;
+        let team_name = self
+            .resolve_team(ctx, &req.team_name)
+            .await
+            .ok_or_else(|| {
+                crate::effects::EffectError::invalid_input("Could not resolve team name")
+            })?;
 
-        let task_path = self.tasks_dir.join(&team_name).join(format!("{}.json", req.task_id));
+        let task_path = self
+            .tasks_dir
+            .join(&team_name)
+            .join(format!("{}.json", req.task_id));
         if !task_path.exists() {
-            return Ok(GetTaskResponse { task: None, found: false });
+            return Ok(GetTaskResponse {
+                task: None,
+                found: false,
+            });
         }
 
         let content = fs::read_to_string(&task_path).effect_err("tasks")?;
@@ -125,15 +164,38 @@ impl TasksEffects for TasksHandler {
         let task = Task {
             id: task_val["id"].as_str().unwrap_or_default().to_string(),
             subject: task_val["subject"].as_str().unwrap_or_default().to_string(),
-            description: task_val["description"].as_str().unwrap_or_default().to_string(),
-            active_form: task_val["activeForm"].as_str().unwrap_or_default().to_string(),
+            description: task_val["description"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            active_form: task_val["activeForm"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             status: task_val["status"].as_str().unwrap_or_default().to_string(),
-            blocks: task_val["blocks"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
-            blocked_by: task_val["blockedBy"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
+            blocks: task_val["blocks"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            blocked_by: task_val["blockedBy"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             owner: task_val["owner"].as_str().unwrap_or_default().to_string(),
         };
 
-        Ok(GetTaskResponse { task: Some(task), found: true })
+        Ok(GetTaskResponse {
+            task: Some(task),
+            found: true,
+        })
     }
 
     async fn update_task(
@@ -141,13 +203,20 @@ impl TasksEffects for TasksHandler {
         req: UpdateTaskRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<UpdateTaskResponse> {
-        let team_name = self.resolve_team(ctx, &req.team_name).await
-            .ok_or_else(|| crate::effects::EffectError::invalid_input("Could not resolve team name"))?;
+        let team_name = self
+            .resolve_team(ctx, &req.team_name)
+            .await
+            .ok_or_else(|| {
+                crate::effects::EffectError::invalid_input("Could not resolve team name")
+            })?;
 
         let team_dir = self.tasks_dir.join(&team_name);
         let task_path = team_dir.join(format!("{}.json", req.task_id));
         if !task_path.exists() {
-            return Ok(UpdateTaskResponse { success: false, error: format!("Task {} not found in team {}", req.task_id, team_name) });
+            return Ok(UpdateTaskResponse {
+                success: false,
+                error: format!("Task {} not found in team {}", req.task_id, team_name),
+            });
         }
 
         let content = fs::read_to_string(&task_path).effect_err("tasks")?;
@@ -171,7 +240,10 @@ impl TasksEffects for TasksHandler {
 
         info!(team_name = %team_name, task_id = %req.task_id, "Updated task");
 
-        Ok(UpdateTaskResponse { success: true, error: String::new() })
+        Ok(UpdateTaskResponse {
+            success: true,
+            error: String::new(),
+        })
     }
 }
 
@@ -256,10 +328,16 @@ mod tests {
         assert!(update_resp.success);
 
         // Verify update
-        let get_resp = handler.get_task(GetTaskRequest {
-            team_name: "my-team".into(),
-            task_id: "1".into(),
-        }, &ctx).await.unwrap();
+        let get_resp = handler
+            .get_task(
+                GetTaskRequest {
+                    team_name: "my-team".into(),
+                    task_id: "1".into(),
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
         let t = get_resp.task.unwrap();
         assert_eq!(t.status, "completed");
         assert_eq!(t.owner, "me");

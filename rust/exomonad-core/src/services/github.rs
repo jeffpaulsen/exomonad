@@ -1,4 +1,6 @@
-use crate::domain::{BranchName, CommitSha, IssueNumber, ItemState, PRNumber, ReviewState as DomainReviewState};
+use crate::domain::{
+    BranchName, CommitSha, IssueNumber, ItemState, PRNumber, ReviewState as DomainReviewState,
+};
 use crate::{FFIBoundary, GithubOwner, GithubRepo};
 use anyhow::{anyhow, Result};
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
@@ -437,7 +439,7 @@ impl GitHubService {
 
         info!(repo = %repo_name, number = number.as_u64(), "GitHub API: Get issue successful");
 
-        Ok(issue.try_into()?)
+        issue.try_into()
     }
 
     #[tracing::instrument(skip(self))]
@@ -467,7 +469,7 @@ impl GitHubService {
             "GitHub API: Create PR successful"
         );
 
-        Ok(pr.try_into()?)
+        pr.try_into()
     }
 
     #[tracing::instrument(skip(self))]
@@ -528,10 +530,11 @@ impl GitHubService {
 
         info!(
             repo = format!("{}/{}", repo.owner, repo.name),
-            number = number.as_u64(), "GitHub API: Get PR successful"
+            number = number.as_u64(),
+            "GitHub API: Get PR successful"
         );
 
-        Ok(pr.try_into()?)
+        pr.try_into()
     }
 
     /// Get reviews for a pull request.
@@ -620,12 +623,16 @@ impl GitHubService {
 
         match &pr {
             Some(p) => {
-                tracing::info!(number = p.number, head = head.as_str(), "Found PR for branch")
+                tracing::info!(
+                    number = p.number,
+                    head = head.as_str(),
+                    "Found PR for branch"
+                )
             }
             None => tracing::info!(head = head.as_str(), "No PR found for branch"),
         }
 
-        Ok(pr.map(PullRequest::try_from).transpose()?)
+        pr.map(PullRequest::try_from).transpose()
     }
 
     #[tracing::instrument(skip(self))]

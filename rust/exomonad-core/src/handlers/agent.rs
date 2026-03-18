@@ -235,10 +235,14 @@ impl AgentEffects for AgentHandler {
             "[event] agent.spawned"
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
-                "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "worker",
-                "branch": agent_info.branch_name,
-            }));
+            let _ = log.append(
+                "agent.spawned",
+                ctx.agent_name.as_ref(),
+                &serde_json::json!({
+                    "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "worker",
+                    "branch": agent_info.branch_name,
+                }),
+            );
         }
 
         Ok(SpawnWorkerResponse {
@@ -322,10 +326,14 @@ impl AgentEffects for AgentHandler {
             "[event] agent.spawned"
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
-                "child_agent": agent_info.id, "agent_type": "claude", "spawn_type": "subtree",
-                "branch": agent_info.branch_name,
-            }));
+            let _ = log.append(
+                "agent.spawned",
+                ctx.agent_name.as_ref(),
+                &serde_json::json!({
+                    "child_agent": agent_info.id, "agent_type": "claude", "spawn_type": "subtree",
+                    "branch": agent_info.branch_name,
+                }),
+            );
         }
 
         Ok(SpawnSubtreeResponse {
@@ -369,7 +377,7 @@ impl AgentEffects for AgentHandler {
             "[event] agent.spawned"
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
+            let _ = log.append("agent.spawned", ctx.agent_name.as_ref(), &serde_json::json!({
                 "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "leaf_subtree",
                 "branch": agent_info.branch_name,
             }));
@@ -472,10 +480,14 @@ impl AgentEffects for AgentHandler {
             "[event] agent.spawned"
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
-                "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "acp",
-                "branch": agent_info.branch_name,
-            }));
+            let _ = log.append(
+                "agent.spawned",
+                ctx.agent_name.as_ref(),
+                &serde_json::json!({
+                    "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "acp",
+                    "branch": agent_info.branch_name,
+                }),
+            );
         }
 
         Ok(SpawnAcpResponse {
@@ -744,9 +756,7 @@ mod tests {
     fn test_handler() -> AgentHandler {
         let dir = PathBuf::from(".");
         let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
-        let service = Arc::new(
-            AgentControlService::new(dir, None, git_wt),
-        );
+        let service = Arc::new(AgentControlService::new(dir, None, git_wt));
         AgentHandler::new(service)
     }
 

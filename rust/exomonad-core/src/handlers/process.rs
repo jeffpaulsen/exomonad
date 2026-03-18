@@ -18,6 +18,12 @@ use std::time::Duration;
 /// trusts WASM author. Working dir is confined to the agent's worktree root.
 pub struct ProcessHandler;
 
+impl Default for ProcessHandler {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl ProcessHandler {
     pub fn new() -> Self {
         Self

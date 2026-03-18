@@ -5,7 +5,7 @@ use agent_client_protocol::{Agent, PromptRequest};
 use claude_teams_bridge as teams_mailbox;
 use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::events::{event, AgentMessage, Event};
-use tracing::{debug, info, warn, instrument};
+use tracing::{debug, info, instrument, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryResult {
@@ -52,6 +52,7 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
 /// inside the message body, so the TL sees: `[from: leaf-id] [PR READY] PR #5...`
 ///
 /// For peer-to-peer messaging, use `deliver_to_agent()` directly instead.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
     team_registry: Option<&TeamRegistry>,
@@ -76,12 +77,16 @@ pub async fn notify_parent_delivery(
         "[event] agent.notify_parent"
     );
     if let Some(log) = event_log {
-        let _ = log.append("agent.notify_parent", agent_id, &serde_json::json!({
-            "parent": parent_session_id,
-            "status": status,
-            "message": message,
-            "source": source,
-        }));
+        let _ = log.append(
+            "agent.notify_parent",
+            agent_id,
+            &serde_json::json!({
+                "parent": parent_session_id,
+                "status": status,
+                "message": message,
+                "source": source,
+            }),
+        );
     }
 
     // 2. Publish to event queue
@@ -180,6 +185,7 @@ async fn deliver_via_uds(
 /// Attempts ACP prompt delivery if a registry is provided and agent is registered.
 /// Attempts HTTP-over-UDS delivery for custom binary agents (e.g., shoal-agent).
 /// Falls back to tmux input injection if other delivery methods fail or are not available.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,

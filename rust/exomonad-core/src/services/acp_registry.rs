@@ -35,11 +35,17 @@ pub struct AcpRegistry {
     connections: Arc<RwLock<HashMap<String, Arc<AcpConnection>>>>,
 }
 
-impl AcpRegistry {
-    pub fn new() -> Self {
+impl Default for AcpRegistry {
+    fn default() -> Self {
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+}
+
+impl AcpRegistry {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub async fn register(&self, agent_id: String, conn: AcpConnection) {

@@ -46,7 +46,9 @@ impl From<WorktreeError> for EffectError {
             WorktreeError::PushRejected { message } => {
                 EffectError::custom("worktree.push_rejected", message)
             }
-            WorktreeError::GitError { message } => EffectError::custom("worktree.git_error", message),
+            WorktreeError::GitError { message } => {
+                EffectError::custom("worktree.git_error", message)
+            }
         }
     }
 }
@@ -282,7 +284,10 @@ impl GitWorktreeService {
                     .to_string();
                 WorktreeError::PathExists { path }
             }
-        } else if stderr.contains("not a valid object") || stderr.contains("not a commit") || stderr.contains("invalid reference") {
+        } else if stderr.contains("not a valid object")
+            || stderr.contains("not a commit")
+            || stderr.contains("invalid reference")
+        {
             let branch = stderr.split('\'').nth(1).unwrap_or("unknown").to_string();
             WorktreeError::BaseBranchNotFound { branch }
         } else if stderr.contains(".lock") {

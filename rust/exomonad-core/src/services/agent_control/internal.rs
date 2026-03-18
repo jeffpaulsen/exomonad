@@ -238,6 +238,7 @@ impl AgentControlService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_tmux_window_inner(
         &self,
         name: &str,
@@ -353,6 +354,7 @@ impl AgentControlService {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_tmux_pane(
         &self,
         name: &str,

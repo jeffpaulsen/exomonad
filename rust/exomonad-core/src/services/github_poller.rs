@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, warn, instrument};
+use tracing::{error, info, instrument, warn};
 
 type PluginMap = Arc<RwLock<HashMap<crate::AgentName, Arc<PluginManager>>>>;
 
@@ -117,6 +117,7 @@ impl PRState {
 
 /// Pure state machine: given old state + new observations, compute pending actions.
 /// Testable without GitHub API calls.
+#[allow(clippy::too_many_arguments)]
 fn compute_pr_actions(
     old_state: &mut PRState,
     pr_number: PRNumber,
@@ -190,9 +191,9 @@ fn compute_pr_actions(
     }
 
     // Check for Copilot approval
-    let approved = copilot_reviews.iter().any(|r| {
-        r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved")
-    });
+    let approved = copilot_reviews
+        .iter()
+        .any(|r| r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved"));
     if approved && old_state.last_review_state != ReviewState::Approved {
         old_state.last_review_state = ReviewState::Approved;
         old_state.notified_parent_approved = true;
@@ -349,7 +350,7 @@ impl GitHubPoller {
             AgentType::Shoal => "dev",
         };
 
-        tracing::Span::current().record("role", &role);
+        tracing::Span::current().record("role", role);
 
         let event_input = serde_json::json!({
             "role": role,
@@ -396,10 +397,14 @@ impl GitHubPoller {
                     "[event] event.dispatched"
                 );
                 if let Some(ref log) = self.event_log {
-                    let _ = log.append("event.dispatched", agent_name, &serde_json::json!({
-                        "event_type": event_type,
-                        "action": action_str,
-                    }));
+                    let _ = log.append(
+                        "event.dispatched",
+                        agent_name,
+                        &serde_json::json!({
+                            "event_type": event_type,
+                            "action": action_str,
+                        }),
+                    );
                 }
 
                 Ok(Some(action))
@@ -418,10 +423,14 @@ impl GitHubPoller {
                     "[event] event.dispatch_failed"
                 );
                 if let Some(ref log) = self.event_log {
-                    let _ = log.append("event.dispatch_failed", agent_name, &serde_json::json!({
-                        "event_type": event_type,
-                        "error": e.to_string(),
-                    }));
+                    let _ = log.append(
+                        "event.dispatch_failed",
+                        agent_name,
+                        &serde_json::json!({
+                            "event_type": event_type,
+                            "error": e.to_string(),
+                        }),
+                    );
                 }
 
                 Ok(None)
@@ -614,11 +623,15 @@ impl GitHubPoller {
                         "[event] agent.sibling_merged"
                     );
                     if let Some(ref log) = self.event_log {
-                        let _ = log.append("agent.sibling_merged", branch.as_str(), &serde_json::json!({
-                            "pr_number": pr_num.as_u64(),
-                            "branch": branch.as_str(),
-                            "parent": parent_branch,
-                        }));
+                        let _ = log.append(
+                            "agent.sibling_merged",
+                            branch.as_str(),
+                            &serde_json::json!({
+                                "pr_number": pr_num.as_u64(),
+                                "branch": branch.as_str(),
+                                "parent": parent_branch,
+                            }),
+                        );
                     }
 
                     removed_prs.push(*pr_num);
@@ -977,6 +990,7 @@ impl GitHubPoller {
             .await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn emit_event_with_reviews(
         &self,
         branch: &str,
@@ -1021,13 +1035,17 @@ impl GitHubPoller {
             event_name
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append(event_name, branch, &serde_json::json!({
-                "branch": branch,
-                "status": status,
-                "message": message,
-                "comments": comments,
-                "reviews": reviews,
-            }));
+            let _ = log.append(
+                event_name,
+                branch,
+                &serde_json::json!({
+                    "branch": branch,
+                    "status": status,
+                    "message": message,
+                    "comments": comments,
+                    "reviews": reviews,
+                }),
+            );
         }
 
         let event = Event {
@@ -1199,9 +1217,13 @@ mod tests {
             &|_, _| String::new(),
         );
 
-        assert!(actions.iter().any(
-            |a| matches!(a, PendingAction::WasmEvent { event_type: "ci_status", .. })
-        ));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            PendingAction::WasmEvent {
+                event_type: "ci_status",
+                ..
+            }
+        )));
         assert!(actions
             .iter()
             .any(|a| matches!(a, PendingAction::EmitEvent { status, .. } if status == "failure")));
