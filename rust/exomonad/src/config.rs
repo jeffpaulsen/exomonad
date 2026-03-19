@@ -25,6 +25,24 @@ pub enum McpServerConfig {
     },
 }
 
+/// Companion agent spawned alongside the TL during init.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompanionConfig {
+    /// Agent name (used for tmux window, identity files).
+    pub name: String,
+    /// WASM role for MCP tools (default: "worker").
+    #[serde(default = "default_companion_role")]
+    pub role: String,
+    /// Command to launch (e.g., "claude --dangerously-skip-permissions -c").
+    pub command: String,
+    /// Task/prompt passed as positional arg to the command.
+    pub task: String,
+}
+
+fn default_companion_role() -> String {
+    "worker".to_string()
+}
+
 /// Raw configuration from file (supports both config.toml and config.local.toml fields).
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct RawConfig {
@@ -69,6 +87,10 @@ pub struct RawConfig {
     #[serde(default)]
     pub yolo: bool,
 
+    /// Companion agents to spawn alongside the TL.
+    #[serde(default)]
+    pub companions: Vec<CompanionConfig>,
+
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
@@ -99,6 +121,8 @@ pub struct Config {
     pub initial_prompt: Option<String>,
     /// When true, spawned Gemini agents receive `--yolo` flag.
     pub yolo: bool,
+    /// Companion agents to spawn alongside the TL.
+    pub companions: Vec<CompanionConfig>,
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
@@ -218,6 +242,12 @@ impl Config {
         // Resolve yolo: local > global > false
         let yolo = local_raw.yolo || global_raw.yolo;
 
+        let companions = if !local_raw.companions.is_empty() {
+            local_raw.companions
+        } else {
+            global_raw.companions
+        };
+
         // Resolve otlp_endpoint: local > global
         let otlp_endpoint = local_raw.otlp_endpoint.or(global_raw.otlp_endpoint);
 
@@ -234,6 +264,7 @@ impl Config {
             extra_mcp_servers,
             initial_prompt,
             yolo,
+            companions,
             otlp_endpoint,
         })
     }
@@ -265,6 +296,7 @@ impl Default for Config {
             extra_mcp_servers: std::collections::HashMap::new(),
             initial_prompt: None,
             yolo: false,
+            companions: Vec::new(),
             otlp_endpoint: None,
         }
     }
@@ -424,5 +456,19 @@ mod tests {
             }
             _ => panic!("Expected Stdio variant"),
         }
+    }
+
+    #[test]
+    fn test_raw_config_parse_companions() {
+        let content = r#"
+            [[companions]]
+            name = "sleeptime"
+            command = "claude -c"
+            task = "You are sleeptime"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.companions.len(), 1);
+        assert_eq!(raw.companions[0].name, "sleeptime");
+        assert_eq!(raw.companions[0].role, "worker");
     }
 }

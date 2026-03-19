@@ -399,7 +399,66 @@ use std::io::{IsTerminal, Write};
     // 4. Poll for server socket
     wait_for_server_socket(&cwd).await?;
 
-    // 5. Attach
+    // 5. Spawn companion agents
+    for companion in &config.companions {
+        // Validate companion name (alphanumeric, hyphens, underscores only)
+        if !companion.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            anyhow::bail!(
+                "Invalid companion name '{}': must contain only [A-Za-z0-9_-]",
+                companion.name
+            );
+        }
+
+        info!(name = %companion.name, role = %companion.role, "Spawning companion agent");
+
+        // Create agent identity directory
+        let agent_dir = cwd.join(".exo/agents").join(&companion.name);
+        std::fs::create_dir_all(&agent_dir)?;
+
+        // Write birth_branch identity — no dots, so resolve_working_dir returns "."
+        // (companions run in the project root, not in a worktree)
+        std::fs::write(agent_dir.join(".birth_branch"), &companion.name)?;
+
+        // Write .mcp.json for companion
+        let companion_mcp = serde_json::json!({
+            "mcpServers": {
+                "exomonad": {
+                    "type": "stdio",
+                    "command": "exomonad",
+                    "args": ["mcp-stdio", "--role", &companion.role, "--name", &companion.name]
+                }
+            }
+        });
+        std::fs::write(
+            agent_dir.join(".mcp.json"),
+            serde_json::to_string_pretty(&companion_mcp)?,
+        )?;
+
+        // Write hook config for companion
+        exomonad_core::hooks::HookConfig::write_persistent(&agent_dir, &binary_path, None)
+            .context("Failed to write companion hook configuration")?;
+
+        // Create tmux window for companion
+        let companion_cmd = format!(
+            "{} '{}'",
+            companion.command,
+            companion.task.replace('\'', "'\\''")
+        );
+        let window_id = ipc.new_window(&companion.name, &cwd, &shell, &companion_cmd).await?;
+
+        // Write routing.json with window_id
+        let routing = serde_json::json!({
+            "window_id": window_id.as_str()
+        });
+        std::fs::write(
+            agent_dir.join("routing.json"),
+            serde_json::to_string_pretty(&routing)?,
+        )?;
+
+        info!(name = %companion.name, window = %window_id.as_str(), "Companion agent spawned");
+    }
+
+    // 6. Attach
     info!(session = %session, "Attaching to session");
     TmuxIpc::attach_session(&session).await
 }
