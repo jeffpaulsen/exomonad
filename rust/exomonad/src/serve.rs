@@ -129,10 +129,10 @@ pub async fn resolve_plugin(
 ) -> anyhow::Result<Arc<PluginManager>> {
     let agent_name = AgentName::from(name);
 
-    // Root's birth branch tracks the current git branch, which can change
-    // between sessions. Always re-resolve and invalidate if it drifted.
+    // Root's birth branch is written to .exo/agents/root/.birth_branch by init.
+    // Re-resolve on every request to detect branch changes between sessions.
     if name == "root" {
-        let birth_branch = BirthBranch::root()?;
+        let birth_branch = resolve_agent_birth_branch(worktree_base, name).await?;
         {
             let cache = plugins.read().await;
             if let Some(p) = cache.get(&agent_name) {
@@ -787,7 +787,9 @@ Run `exomonad recompile` first to build it.",
     .with_acp_registry(acp_registry.clone());
     let worktree_base = config.worktree_base.clone();
     agent_control = agent_control.with_worktree_base(worktree_base.clone());
-    agent_control = agent_control.with_birth_branch(BirthBranch::root()?);
+    agent_control = agent_control.with_birth_branch(
+        resolve_agent_birth_branch(&worktree_base, "root").await?,
+    );
     agent_control = agent_control.with_tmux_session(config.tmux_session.clone());
     agent_control = agent_control.with_yolo(config.yolo);
     let event_session_id = uuid::Uuid::new_v4().to_string();
