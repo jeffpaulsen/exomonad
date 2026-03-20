@@ -152,7 +152,10 @@ impl HookConfig {
         // Code doesn't recognize .git files (worktree pointers) as project boundaries.
         // Exclude the parent's context files so the child only loads its own.
         if let Some(parent_dir) = parent_project_dir {
-            let parent = parent_dir.to_string_lossy();
+            // Canonicalize to resolve any `.` or `..` segments — glob matching
+            // requires clean absolute paths.
+            let canonical = parent_dir.canonicalize().unwrap_or(parent_dir.to_path_buf());
+            let parent = canonical.to_string_lossy();
             settings["claudeMdExcludes"] = json!([
                 format!("{}/CLAUDE.md", parent),
                 format!("{}/CLAUDE.local.md", parent),

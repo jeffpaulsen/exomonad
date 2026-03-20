@@ -709,10 +709,13 @@ pub async fn run(config: &Config) -> Result<()> {
         info!(traceparent = %tp, "Inherited parent trace context");
     }
 
-    let project_dir = if config.project_dir.is_absolute() {
-        config.project_dir.clone()
-    } else {
-        std::env::current_dir()?.join(&config.project_dir)
+    let project_dir = {
+        let raw = if config.project_dir.is_absolute() {
+            config.project_dir.clone()
+        } else {
+            std::env::current_dir()?.join(&config.project_dir)
+        };
+        raw.canonicalize().unwrap_or(raw)
     };
 
     // Generate or load swarm run_id (persists across server restarts, resets on init --recreate)
