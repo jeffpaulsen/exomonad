@@ -372,6 +372,18 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         );
     }
 
+    // Set EXOMONAD_ROLE=root so hook CLI passes &role=root to server
+    let role_output = std::process::Command::new("tmux")
+        .args(["set-environment", "-t", &session, "EXOMONAD_ROLE", "root"])
+        .output()
+        .context("Failed to set EXOMONAD_ROLE in tmux session")?;
+    if !role_output.status.success() {
+        warn!(
+            "tmux set-environment EXOMONAD_ROLE failed: {}",
+            String::from_utf8_lossy(&role_output.stderr)
+        );
+    }
+
     // Set terminal window title to project/session name
     let _ = std::process::Command::new("tmux")
         .args(["set-option", "-t", &session, "set-titles", "on"])

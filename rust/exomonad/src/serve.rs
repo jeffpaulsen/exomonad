@@ -788,9 +788,8 @@ Run `exomonad recompile` first to build it.",
     .with_wasm_name(wasm_name.clone());
     let worktree_base = config.worktree_base.clone();
     agent_control = agent_control.with_worktree_base(worktree_base.clone());
-    agent_control = agent_control.with_birth_branch(
-        resolve_agent_birth_branch(&worktree_base, "root").await?,
-    );
+    agent_control =
+        agent_control.with_birth_branch(resolve_agent_birth_branch(&worktree_base, "root").await?);
     agent_control = agent_control.with_tmux_session(config.tmux_session.clone());
     agent_control = agent_control.with_yolo(config.yolo);
     let event_session_id = uuid::Uuid::new_v4().to_string();
