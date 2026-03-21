@@ -577,26 +577,53 @@ impl AgentEffects for AgentHandler {
             .join(&agent_key)
             .join("routing.json");
 
-        let pane_target = if let Ok(content) = std::fs::read_to_string(&routing_path) {
-            serde_json::from_str::<serde_json::Value>(&content)
-                .ok()
-                .and_then(|r| r["pane_id"].as_str().map(String::from))
+        let routing = if let Ok(content) = std::fs::read_to_string(&routing_path) {
+            serde_json::from_str::<serde_json::Value>(&content).ok()
         } else {
             None
         };
 
-        if let Some(pane_id) = &pane_target {
-            if let Err(e) = crate::services::tmux_events::close_worker_pane(pane_id).await {
-                warn!(agent = %ctx.agent_name, pane_id = %pane_id, error = %e, "Failed to close worker pane");
+        let mut closed = false;
+
+        if let Some(ref r) = routing {
+            // Try pane_id first (ephemeral workers)
+            if let Some(pane_id) = r["pane_id"].as_str() {
+                info!(agent = %ctx.agent_name, pane_id = %pane_id, "Closing worker pane");
+                if let Err(e) = crate::services::tmux_events::close_worker_pane(pane_id).await {
+                    warn!(agent = %ctx.agent_name, pane_id = %pane_id, error = %e, "Failed to close worker pane");
+                } else {
+                    closed = true;
+                }
+            }
+            // Try window_id (worktree-based agents)
+            else if let Some(window_id) = r["window_id"].as_str() {
+                info!(agent = %ctx.agent_name, window_id = %window_id, "Closing agent window");
+                let session = std::env::var("EXOMONAD_TMUX_SESSION")
+                    .unwrap_or_else(|_| "exomonad".to_string());
+                let ipc = crate::services::tmux_ipc::TmuxIpc::new(&session);
+                match crate::services::tmux_ipc::WindowId::parse(window_id) {
+                    Ok(wid) => {
+                        if let Err(e) = ipc.kill_window(&wid).await {
+                            warn!(agent = %ctx.agent_name, window_id = %window_id, error = %e, "Failed to close agent window");
+                        } else {
+                            closed = true;
+                        }
+                    }
+                    Err(e) => {
+                        warn!(agent = %ctx.agent_name, window_id = %window_id, error = %e, "Invalid window_id in routing.json");
+                    }
+                }
+            } else {
+                warn!(agent = %ctx.agent_name, "No pane_id or window_id in routing.json");
             }
         } else {
-            warn!(agent = %ctx.agent_name, "No pane_id in routing.json, cannot close pane");
+            warn!(agent = %ctx.agent_name, path = %routing_path.display(), "Could not read routing.json");
         }
 
-        info!(agent = %ctx.agent_name, pane = ?pane_target, "Agent requested self-closure");
+        info!(agent = %ctx.agent_name, closed, "Agent requested self-closure");
 
         Ok(CloseSelfResponse {
-            success: true,
+            success: closed,
             error: String::new(),
         })
     }
