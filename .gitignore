@@ -100,3 +100,4 @@ try-exomonad/artifacts/
 vendor/notebooklm-mcp/node_modules/
 vendor/notebooklm-mcp/dist/
 vendor/notebooklm-mcp/.env
+vendor/notebooklm-mcp/.exo/
