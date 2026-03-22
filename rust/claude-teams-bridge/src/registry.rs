@@ -51,13 +51,16 @@ impl TeamRegistry {
         map.get(key).cloned()
     }
 
-    /// Get all entries for a given team name.
+    /// Get all entries for a given team name, sorted by key for deterministic ordering.
     pub async fn get_all_for_team(&self, team_name: &str) -> Vec<(String, TeamInfo)> {
         let map = self.inner.lock().await;
-        map.iter()
+        let mut entries: Vec<(String, TeamInfo)> = map
+            .iter()
             .filter(|(_, info)| info.team_name == team_name)
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+            .collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        entries
     }
 
     pub async fn deregister(&self, key: &str) {

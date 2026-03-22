@@ -721,12 +721,15 @@ pub enum Address {
         team: TeamName,
         member: Option<AgentName>,
     },
-    /// Supervisor (resolved via SupervisorRegistry at routing time).
+    /// Default supervisor sentinel; routes to root TL via `route_message()`.
+    /// SupervisorRegistry resolution happens in the events handler before
+    /// reaching route_message — this variant is the fallback when no
+    /// explicit supervisor is registered.
     Supervisor,
 }
 
 impl Address {
-    /// Convert from proto Address. None/empty → Supervisor (caller wants default routing).
+    /// Convert from proto Address. None/empty → Supervisor (caller wants default/root routing).
     pub fn from_proto(addr: Option<exomonad_proto::effects::events::Address>) -> Self {
         use exomonad_proto::effects::events::address::Kind;
         match addr.as_ref().and_then(|a| a.kind.as_ref()) {

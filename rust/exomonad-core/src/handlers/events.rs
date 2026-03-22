@@ -177,17 +177,46 @@ impl EventEffects for EventHandler {
                 address = %override_addr,
                 "notify_parent: using override_recipient"
             );
-            let notification =
-                crate::services::delivery::format_parent_notification(&agent_id_str, &req.status, &req.message);
-            let summary = format!("Agent update: {}", agent_id_str);
-            crate::services::delivery::route_message(
-                &override_addr,
+            // Resolve the override address to a concrete agent key for notify_parent_delivery
+            let (parent_session_id, tab_name) = match &override_addr {
+                Address::Agent(name) => {
+                    let id = name.as_str().to_string();
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(name.as_str());
+                    (id, tab)
+                }
+                Address::Team { member: Some(m), .. } => {
+                    let id = m.as_str().to_string();
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(m.as_str());
+                    (id, tab)
+                }
+                Address::Team { team, member: None } => {
+                    // Resolve team lead
+                    let lead = if let Some(ref registry) = self.team_registry {
+                        let entries = registry.get_all_for_team(team.as_str()).await;
+                        entries.first().map(|(k, _)| k.clone())
+                    } else {
+                        None
+                    };
+                    let id = lead.unwrap_or_else(|| "root".to_string());
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(&id);
+                    (id, tab)
+                }
+                Address::Supervisor => unreachable!(),
+            };
+
+            crate::services::delivery::notify_parent_delivery(
                 self.team_registry.as_deref(),
                 self.acp_registry.as_deref(),
+                self.event_log.as_deref(),
+                &self.queue,
                 &self.project_dir,
                 &agent_id_str,
-                &notification,
-                &summary,
+                &parent_session_id,
+                &tab_name,
+                &req.status,
+                &req.message,
+                None,
+                "agent",
             )
             .await;
             return Ok(NotifyParentResponse { ack: true });
@@ -273,7 +302,15 @@ impl EventEffects for EventHandler {
             req.summary.clone()
         };
 
-        let address = Address::from_proto(req.recipient);
+        let address = Address::from_proto(req.recipient.clone());
+
+        // Validate: send_message requires an explicit recipient, not Supervisor
+        if matches!(address, Address::Supervisor) {
+            return Err(crate::effects::EffectError::custom(
+                "events.invalid_input",
+                "send_message requires an explicit recipient (agent name or team); got empty/missing recipient".to_string(),
+            ));
+        }
 
         tracing::info!(
             address = %address,
