@@ -37,7 +37,23 @@ verify:
     cargo check --workspace --all-targets
     echo ">>> [3/3] WASM build..."
     just wasm-all
+    echo ">>> [4/4] Proto freshness check..."
+    just proto-check
     echo ">>> All checks passed."
+
+# Verify generated proto files are up-to-date
+proto-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ">>> Regenerating proto to check for drift..."
+    just proto-gen
+    if ! git diff --quiet haskell/proto/src/ rust/exomonad-proto/src/; then
+        echo "ERROR: Generated proto files are out of date."
+        echo "Run 'just proto-gen' and commit the results."
+        git diff --stat haskell/proto/src/ rust/exomonad-proto/src/
+        exit 1
+    fi
+    echo ">>> Proto files are up to date."
 
 # Pre-push checks (formatting + verify)
 pre-push: fmt-check verify
