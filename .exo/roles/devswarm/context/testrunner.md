@@ -94,8 +94,8 @@ Use `instruct` to send:
 
 2. Use `spawn_gemini` with:
    name: 'tests'
-   task: 'Create tests/test_math_ops.py with pytest tests: test add(2,3)==5, subtract(5,3)==2, multiply(3,4)==12. Import from src.math_ops. Commit, push, file PR.'
-   verify: ['python3 -m pytest tests/ -v']
+   task: 'Create tests/test_math_ops.py that imports add, subtract, multiply from src.math_ops and asserts: add(2,3)==5, subtract(5,3)==2, multiply(3,4)==12. Use plain assert statements in functions named test_add, test_subtract, test_multiply. Commit, push, file PR.'
+   verify: ['python3 -c "import sys; sys.path.insert(0,\".\"); from tests.test_math_ops import test_add, test_subtract, test_multiply; test_add(); test_subtract(); test_multiply(); print(\"3 tests passed\")"']
 
 After spawning BOTH, IDLE and wait for notifications. When you receive [FIXES PUSHED] or [REVIEW TIMEOUT], merge with merge_pr."
 
