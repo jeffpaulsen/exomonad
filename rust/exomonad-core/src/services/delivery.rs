@@ -473,7 +473,16 @@ pub async fn deliver_to_agent(
     summary: &str,
 ) -> DeliveryResult {
     if let Some(registry) = team_registry {
-        if let Some(team_info) = registry.get(agent_key).await {
+        // Resolve sender's team to scope Tier 2 config.json lookup
+        let sender_team = registry.get(from).await.map(|info| info.team_name);
+        // Track whether this is a Tier 2 (config.json) resolution — CC-native agents
+        // don't have worktrees or routing.json, so the verifier's tmux fallback
+        // should be skipped for them.
+        let is_in_memory = registry.get(agent_key).await.is_some();
+        if let Some(team_info) = registry
+            .resolve(agent_key, sender_team.as_deref())
+            .await
+        {
             match teams_mailbox::write_to_inbox(
                 &team_info.team_name,
                 &team_info.inbox_name,
@@ -503,11 +512,14 @@ pub async fn deliver_to_agent(
 
                     // Spawn background task to verify CC's InboxPoller read the message.
                     // If not read within 30s, fall back to tmux STDIN injection.
+                    // For Tier 2 (CC-native) recipients, skip tmux fallback — they don't
+                    // have exomonad worktrees or routing.json. CC's InboxPoller owns delivery.
                     let team_name = team_info.team_name.clone();
                     let inbox_name = team_info.inbox_name.clone();
                     let agent = agent_key.to_string();
                     let target = tmux_target.to_string();
                     let msg = message.to_string();
+                    let has_tmux_fallback = is_in_memory;
                     let worktree = if agent_key.contains('.') {
                         crate::services::resolve_working_dir(agent_key)
                     } else if tmux_target == "TL" {
@@ -533,6 +545,14 @@ pub async fn deliver_to_agent(
                             if is_read {
                                 return;
                             }
+                        }
+                        if !has_tmux_fallback {
+                            warn!(
+                                agent = %agent,
+                                team = %team_name,
+                                "Teams inbox message not read after 30s (Tier 2 recipient, no tmux fallback)"
+                            );
+                            return;
                         }
                         warn!(
                             agent = %agent,

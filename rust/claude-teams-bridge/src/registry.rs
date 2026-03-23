@@ -1,14 +1,21 @@
-//! In-memory registry mapping agent identity to Claude Teams info.
+//! Two-tier registry mapping agent identity to Claude Teams info.
 //!
-//! Populated by the SessionStart hook (via `session.register_team` effect)
-//! when a Claude agent creates its isolated team on startup.
-//! Queried by `notify_parent` and GitHub poller to route messages via
-//! Teams inbox instead of tmux STDIN injection.
+//! **Tier 1 (in-memory):** Populated by the SessionStart hook (via `session.register_team`
+//! effect) when an exomonad agent creates its team on startup.
+//!
+//! **Tier 2 (config.json fallback):** On Tier 1 miss, scans the sender's team's
+//! `~/.claude/teams/{team}/config.json` on disk. This finds CC-native teammates
+//! (spawned via Claude Code's Task/SendMessage) that never run exomonad MCP.
+//!
+//! The blessed entry point is `TeamRegistry::resolve()`, which tries both tiers.
+//! `TeamRegistry::get()` is Tier 1 only (for callers that don't need disk fallback).
+//! `TeamRegistry::resolve_from_config()` is Tier 2 only (synchronous, for callers
+//! that already know the team name).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{debug, info};
 
 /// Info about an agent's Claude Teams membership.
 #[derive(Debug, Clone)]
@@ -61,6 +68,48 @@ impl TeamRegistry {
             .collect();
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
         entries
+    }
+
+    /// Two-tier lookup: in-memory first, then config.json scan scoped by sender's team.
+    ///
+    /// Tier 1: Check the in-memory registry (exomonad agents that called `register_team`).
+    /// Tier 2: On miss, scan the sender's team's `config.json` on disk (CC-native agents
+    /// that never run exomonad MCP). The sender's team scopes the search to disambiguate
+    /// agents with the same name across different teams.
+    pub async fn resolve(
+        &self,
+        recipient: &str,
+        sender_team_hint: Option<&str>,
+    ) -> Option<TeamInfo> {
+        // Tier 1: in-memory (exomonad agents)
+        if let Some(info) = self.get(recipient).await {
+            return Some(info);
+        }
+        // Tier 2: disk scan scoped to sender's team (CC-native agents)
+        if let Some(team_name) = sender_team_hint {
+            return Self::resolve_from_config(team_name, recipient);
+        }
+        None
+    }
+
+    /// Scan a team's config.json for a member by name (synchronous, no async).
+    ///
+    /// Reads `~/.claude/teams/{team_name}/config.json` and searches for a member
+    /// matching `recipient`. Returns `TeamInfo` with the team name and member name
+    /// as inbox key. Useful for callers that already know the team name and want
+    /// to skip the in-memory check.
+    pub fn resolve_from_config(team_name: &str, recipient: &str) -> Option<TeamInfo> {
+        let config = crate::config::read_team_config(team_name).ok()?;
+        let member = config.members.iter().find(|m| m.name == recipient)?;
+        debug!(
+            team = %team_name,
+            recipient = %recipient,
+            "Resolved agent from config.json (Tier 2)"
+        );
+        Some(TeamInfo {
+            team_name: team_name.to_string(),
+            inbox_name: member.name.clone(),
+        })
     }
 
     pub async fn deregister(&self, key: &str) {
@@ -204,5 +253,137 @@ mod tests {
         .await;
         assert_eq!(reg.get("root").await.unwrap().team_name, "root-team");
         assert_eq!(reg.get("agent").await.unwrap().team_name, "agent-team");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_tier1_in_memory() {
+        let reg = TeamRegistry::new();
+        reg.register(
+            "agent-1",
+            TeamInfo {
+                team_name: "my-team".into(),
+                inbox_name: "agent-1".into(),
+            },
+        )
+        .await;
+        // Tier 1 hit — no sender hint needed
+        let result = reg.resolve("agent-1", None).await.unwrap();
+        assert_eq!(result.team_name, "my-team");
+        assert_eq!(result.inbox_name, "agent-1");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_no_hint_no_memory_returns_none() {
+        let reg = TeamRegistry::new();
+        // Not in memory, no sender hint → None
+        assert!(reg.resolve("unknown-agent", None).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_tier1_takes_priority_over_hint() {
+        let reg = TeamRegistry::new();
+        reg.register(
+            "agent-1",
+            TeamInfo {
+                team_name: "in-memory-team".into(),
+                inbox_name: "agent-1".into(),
+            },
+        )
+        .await;
+        // Even with a sender hint, Tier 1 (in-memory) wins
+        let result = reg
+            .resolve("agent-1", Some("other-team"))
+            .await
+            .unwrap();
+        assert_eq!(result.team_name, "in-memory-team");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_from_config_nonexistent_team() {
+        // Team doesn't exist on disk → None
+        assert!(TeamRegistry::resolve_from_config("nonexistent-team-xyz", "agent").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_tier2_from_config() {
+        // Create a real team config on disk
+        let team_name = "test-resolve-tier2";
+        let config = crate::config::TeamConfig {
+            name: team_name.into(),
+            description: "test".into(),
+            created_at: 0,
+            lead_agent_id: "lead".into(),
+            lead_session_id: "session".into(),
+            members: vec![crate::config::TeamMember {
+                agent_id: "uuid-123".into(),
+                name: "supervisor".into(),
+                agent_type: "claude".into(),
+                model: "opus".into(),
+                joined_at: 0,
+                cwd: "/tmp".into(),
+            }],
+        };
+        crate::config::write_team_config(team_name, &config).unwrap();
+
+        // Resolve via Tier 2
+        let result = TeamRegistry::resolve_from_config(team_name, "supervisor").unwrap();
+        assert_eq!(result.team_name, team_name);
+        assert_eq!(result.inbox_name, "supervisor");
+
+        // Non-member returns None
+        assert!(TeamRegistry::resolve_from_config(team_name, "nonexistent").is_none());
+
+        // Cleanup
+        if let Some(dir) = crate::paths::teams_base_dir() {
+            let _ = std::fs::remove_dir_all(dir.join(team_name));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_tier2_scoped_by_sender_team() {
+        // Create two teams with same member name
+        let team_a = "test-resolve-scope-a";
+        let team_b = "test-resolve-scope-b";
+        for (team, cwd) in [(team_a, "/tmp/a"), (team_b, "/tmp/b")] {
+            let config = crate::config::TeamConfig {
+                name: team.into(),
+                description: "test".into(),
+                created_at: 0,
+                lead_agent_id: "lead".into(),
+                lead_session_id: "session".into(),
+                members: vec![crate::config::TeamMember {
+                    agent_id: format!("uuid-{}", team),
+                    name: "team-lead".into(),
+                    agent_type: "claude".into(),
+                    model: "opus".into(),
+                    joined_at: 0,
+                    cwd: cwd.into(),
+                }],
+            };
+            crate::config::write_team_config(team, &config).unwrap();
+        }
+
+        let reg = TeamRegistry::new();
+        // Sender is in team_a → resolve "team-lead" picks team_a's config
+        reg.register(
+            "sender",
+            TeamInfo {
+                team_name: team_a.into(),
+                inbox_name: "sender".into(),
+            },
+        )
+        .await;
+
+        let result = reg.resolve("team-lead", Some(team_a)).await.unwrap();
+        assert_eq!(result.team_name, team_a);
+
+        let result_b = reg.resolve("team-lead", Some(team_b)).await.unwrap();
+        assert_eq!(result_b.team_name, team_b);
+
+        // Cleanup
+        if let Some(dir) = crate::paths::teams_base_dir() {
+            let _ = std::fs::remove_dir_all(dir.join(team_a));
+            let _ = std::fs::remove_dir_all(dir.join(team_b));
+        }
     }
 }

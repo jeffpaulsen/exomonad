@@ -149,6 +149,17 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 `deliver_to_agent()` is correct for peer-to-peer messaging (send_message, event handler InjectMessage).
 
+### Two-Tier TeamRegistry Resolution
+
+`deliver_to_agent()` resolves recipients via `TeamRegistry::resolve()`, a two-tier lookup:
+
+1. **Tier 1 (in-memory)**: Checks the registry for agents that called `register_team` (exomonad agents).
+2. **Tier 2 (config.json)**: On miss, reads `~/.claude/teams/{sender_team}/config.json` to find CC-native teammates that never run exomonad MCP. The sender's team (resolved from `from` parameter) scopes the search to disambiguate same-named agents across teams.
+
+This enables `send_message` and `notify_parent` to reach CC-native teammates (e.g., a "supervisor" spawned via Claude Code's Task tool) without requiring them to register in the in-memory TeamRegistry.
+
+The delivery verifier (background task that polls `is_message_read` for 30s) skips tmux fallback for Tier 2 recipients. CC-native agents don't have exomonad worktrees or routing.json — CC's own InboxPoller is responsible for their message delivery.
+
 ### Routing Resolution
 
 `deliver_to_agent()` resolves the agent's routing.json by trying multiple path candidates: first the direct `agent_key` directory, then slug (last dot-segment) and full `agent_key` with `-gemini`, `-claude`, and `-shoal` suffixes. This handles both peer messaging (where `agent_key` is already the directory name) and parent notification (where `agent_key` is a dotted branch name). Reads `pane_id` (workers), `window_id` (subtrees/leaves), or `parent_tab` (fallback).
