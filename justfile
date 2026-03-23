@@ -170,6 +170,10 @@ test-mcp *args:
 test-e2e:
     ./tests/e2e/run.sh
 
+# Run E2E messaging test (Teams inbox delivery, no spawn/merge)
+e2e-messaging:
+    ./tests/e2e/messaging/run.sh
+
 # Validate Gemini settings against schema
 validate-settings:
     nix-shell -p python3Packages.jsonschema --run "python3 scripts/validate_json.py .gemini/settings.json schema/gemini-cli/settings.schema.json"

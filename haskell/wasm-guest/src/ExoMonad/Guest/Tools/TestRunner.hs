@@ -66,9 +66,12 @@ instructSchema =
 -- | Core instruct I/O: send message to root via events.send_message effect.
 instructCore :: InstructArgs -> Eff Effects (Either Text Value)
 instructCore args = do
+  let address = ProtoEvents.Address
+        { ProtoEvents.addressKind = Just (ProtoEvents.AddressKindAgent "root")
+        }
   result <- suspendEffect @ProtoEvents.EventsSendMessage
               (ProtoEvents.SendMessageRequest
-                { ProtoEvents.sendMessageRequestRecipient = "root",
+                { ProtoEvents.sendMessageRequestRecipient = Just address,
                   ProtoEvents.sendMessageRequestContent = TL.fromStrict (iaContent args),
                   ProtoEvents.sendMessageRequestSummary = "test instruction"
                 })
