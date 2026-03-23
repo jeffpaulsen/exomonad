@@ -40,6 +40,8 @@ pub struct CompanionConfig {
     pub command: String,
     /// Task/prompt passed as positional arg to the command. None = interactive (no initial prompt).
     pub task: Option<String>,
+    /// Model override (e.g., "haiku", "sonnet"). Passed as --model flag to Claude/Gemini.
+    pub model: Option<String>,
 }
 
 fn default_companion_role() -> String {
@@ -101,6 +103,12 @@ pub struct RawConfig {
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
+
+    /// Model override for the root TL agent (e.g., "sonnet", "haiku"). Passed as --model flag.
+    pub model: Option<String>,
+
+    /// GitHub poller interval in seconds (default: 60).
+    pub poll_interval: Option<u64>,
 }
 
 /// Final resolved configuration.
@@ -135,6 +143,11 @@ pub struct Config {
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
+    /// Model override for the root TL agent (e.g., "sonnet", "haiku"). Passed as --model flag.
+    pub model: Option<String>,
+
+    /// GitHub poller interval in seconds (default: 60).
+    pub poll_interval: Option<u64>,
 }
 
 impl Config {
@@ -263,6 +276,12 @@ impl Config {
         // Resolve otlp_endpoint: local > global
         let otlp_endpoint = local_raw.otlp_endpoint.or(global_raw.otlp_endpoint);
 
+        // Resolve model: local > global
+        let model = local_raw.model.or(global_raw.model);
+
+        // Resolve poll_interval: local > global
+        let poll_interval = local_raw.poll_interval.or(global_raw.poll_interval);
+
         Ok(Self {
             project_dir,
             role,
@@ -279,6 +298,8 @@ impl Config {
             companions,
             root_command,
             otlp_endpoint,
+            model,
+            poll_interval,
         })
     }
 
@@ -312,6 +333,8 @@ impl Default for Config {
             companions: Vec::new(),
             root_command: None,
             otlp_endpoint: None,
+            model: None,
+            poll_interval: None,
         }
     }
 }
@@ -510,6 +533,22 @@ mod tests {
         assert_eq!(raw.companions.len(), 2);
         assert_eq!(raw.companions[0].agent_type, Some(AgentType::Claude));
         assert_eq!(raw.companions[1].agent_type, Some(AgentType::Gemini));
+    }
+
+    #[test]
+    fn test_raw_config_parse_model_field() {
+        let content = r#"
+            model = "sonnet"
+
+            [[companions]]
+            name = "test-runner"
+            agent_type = "claude"
+            command = "claude --dangerously-skip-permissions"
+            model = "haiku"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.model, Some("sonnet".to_string()));
+        assert_eq!(raw.companions[0].model, Some("haiku".to_string()));
     }
 
     #[test]

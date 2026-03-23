@@ -48,6 +48,7 @@ executable wasm-guest-devswarm
         TLRole
         DevRole
         WorkerRole
+        TestrunnerRole
         DevPhase
         TLPhase
         TLStopCheck

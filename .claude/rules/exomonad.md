@@ -14,7 +14,7 @@ Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` an
 
 | Tool | Role | What it does |
 |------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, optional context inheritance via `fork_session`) |
+| `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, context inherited by default via `fork_session`) |
 | `spawn_gemini` | root, tl | Spawn Gemini agent in own worktree+branch (files PR). Structured spec fields: steps, verify, boundary, context, read_first |
 | `spawn_worker` | root, tl | Spawn ephemeral Gemini worker in tmux pane (no branch, no PR). Just name + task |
 | `file_pr` | tl, dev | Create/update PR (base branch auto-detected from branch naming) |

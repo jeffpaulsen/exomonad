@@ -166,6 +166,10 @@ proto-test:
 test-mcp *args:
     ./scripts/test-mcp-integration.sh {{args}}
 
+# Run interactive E2E test (starts mocks, drops you into exomonad init session)
+test-e2e:
+    ./tests/e2e/run.sh
+
 # Validate Gemini settings against schema
 validate-settings:
     nix-shell -p python3Packages.jsonschema --run "python3 scripts/validate_json.py .gemini/settings.json schema/gemini-cli/settings.schema.json"

@@ -32,6 +32,7 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 ├── TLRole.hs       # Spawned TL role (spawn, PR, merge, notify_parent, send_message)
 ├── DevRole.hs      # Dev role config (PR, notify_parent, task tools + permission cascade)
 ├── WorkerRole.hs   # Worker role config (notify_parent, task tools, allow-all hooks)
+├── TestrunnerRole.hs # Testrunner role config (instruct + notify_parent, allow-all hooks)
 ├── TLStopCheck.hs  # Shared stop-hook logic for Root and TL roles
 ├── Main.hs         # FFI exports that read role from input JSON
 └── devswarm.cabal  # Package definition

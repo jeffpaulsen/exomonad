@@ -22,7 +22,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TLE
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogEmitEvent, LogInfo)
-import ExoMonad.Guest.Effects.StopHook (getCurrentBranch, checkUncommittedWork)
+import ExoMonad.Guest.Effects.StopHook (getCurrentBranch, checkUncommittedWork, checkPRNotFiled)
 import ExoMonad.Guest.StateMachine (StopCheckResult(..), checkExit, describeStopResult)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), Runtime (..), StopDecision(..), StopHookOutput(..), allowResponse, denyResponse, postToolUseResponse, allowStopResponse, blockStopResponse)
@@ -107,10 +107,14 @@ devStopCheck = do
         MustBlock msg -> pure $ blockStopResponse msg
         ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
         Clean -> do
-          nudge <- checkUncommittedWork branch
-          case nudge of
+          uncommitted <- checkUncommittedWork branch
+          case uncommitted of
             Just msg -> pure $ StopHookOutput Allow (Just msg)
-            Nothing -> pure allowStopResponse
+            Nothing -> do
+              noPR <- checkPRNotFiled branch
+              case noPR of
+                Just msg -> pure $ StopHookOutput Allow (Just msg)
+                Nothing -> pure allowStopResponse
 
 -- | Permission cascade with tool-specific guards.
 permissionCascade :: HookInput -> Eff Effects HookOutput

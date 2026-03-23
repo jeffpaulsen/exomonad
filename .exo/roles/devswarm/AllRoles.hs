@@ -35,6 +35,7 @@ import ExoMonad.Types (EventHandlerConfig, HookConfig (..), RoleConfig (..))
 import qualified DevRole
 import qualified RootRole
 import qualified TLRole
+import qualified TestrunnerRole
 import qualified WorkerRole
 
 -- | Captured role capabilities (avoids existential field name restriction).
@@ -94,7 +95,8 @@ allConfigs =
     [ ("root", mkSomeRoleConfig RootRole.config),
       ("tl", mkSomeRoleConfig TLRole.config),
       ("dev", mkSomeRoleConfig DevRole.config),
-      ("worker", mkSomeRoleConfig WorkerRole.config)
+      ("worker", mkSomeRoleConfig WorkerRole.config),
+      ("testrunner", mkSomeRoleConfig TestrunnerRole.config)
     ]
 
 -- | Look up a role config by name.

@@ -27,7 +27,7 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 
-- **`fork_wave`**: Fork N parallel Claude agents, each in its own worktree. Per-child `fork_session` for context inheritance (default: false). Requires clean git state.
+- **`fork_wave`**: Fork N parallel Claude agents, each in its own worktree. Context inherited by default (`fork_session` defaults to `true`). Requires clean git state.
 - **`spawn_gemini`**: Spawn Gemini agent in own worktree+branch. Files PR when done. Structured spec fields: steps, verify, boundary, context, read_first.
 - **`spawn_worker`**: Spawn ephemeral Gemini worker in tmux pane. No branch, no PR. Just name + task.
 - **`spawn_leaf_subtree`** (SDK core): Lower-level worktree/standalone spawn used by `spawn_gemini`.
@@ -94,6 +94,7 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 | **tl** | `TLForkWave`, `TLSpawnGemini`, `TLSpawnWorker`, `TLMergePR`, `TLFilePR`, `TLNotifyParent`, `SendMessage` | `TLPhase` | `fork_wave` |
 | **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown`, `DevTaskList`, `DevTaskGet`, `DevTaskUpdate` | `DevPhase` (tracks PR lifecycle) | `spawn_gemini` (worktree) |
 | **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` | None (ephemeral) | `spawn_worker` |
+| **testrunner** | `Instruct`, `TestrunnerNotifyParent` | None (allow-all hooks) | Companion config |
 
 ## Hooks
 
@@ -145,7 +146,8 @@ void $ applyEvent @DevPhase @DevEvent DevSpawned (PRCreated prNum url branch)
 | No reviews yet | ShouldNudge | Yes — "system will auto-notify your parent" |
 | Approved | Clean | Yes |
 | No PR, uncommitted work | ShouldNudge | Yes, with nudge |
-| No PR, clean | Clean | Yes |
+| No PR filed for branch | ShouldNudge | Yes, with nudge to file PR |
+| No PR, clean, no commits | Clean | Yes |
 | On main/master | Allow | Yes |
 
 ## Event Handlers

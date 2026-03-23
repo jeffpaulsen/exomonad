@@ -208,6 +208,7 @@ project_dir = "."
 shell_command = "nix develop" # environment wrapper for TL tab + server
 wasm_dir = ".exo/wasm"       # project-local (default), override for shared installs
 wasm_name = "devswarm"       # auto-detected from .exo/roles/ if exactly one role exists
+model = "sonnet"             # optional — passed as --model flag to root TL agent
 
 # Extra MCP servers (HTTP or stdio). Included in .mcp.json for all agents.
 [extra_mcp_servers.metacog]
@@ -226,6 +227,7 @@ agent_type = "claude"          # claude | gemini | shoal
 role = "sleeptime"             # WASM role for MCP tools (default: "worker")
 command = "claude --dangerously-skip-permissions"
 task = "You are sleeptime"     # optional — omit for interactive session
+model = "haiku"                # optional — passed as --model flag to companion
 ```
 
 **Config hierarchy:**
@@ -266,7 +268,7 @@ What you can do with exomonad right now, end-to-end.
 
 Spawn heterogeneous agent teams as a recursive tree:
 
-- **`fork_wave`** — Fork N parallel Claude agents, each in its own worktree. Optionally inherit context via `fork_session: true` per child. Requires clean git state (committed and pushed).
+- **`fork_wave`** — Fork N parallel Claude agents, each in its own worktree. Context inherited by default (`fork_session` defaults to `true`); set `false` for fresh-start children. Requires clean git state (committed and pushed).
 - **`spawn_gemini`** — Spawn Gemini agent in own worktree+branch. Files PR when done. Structured spec fields (steps, verify, boundary, context, read_first).
 - **`spawn_worker`** — Spawn ephemeral Gemini worker in tmux pane. No branch, no PR. Just name + task.
 
@@ -436,7 +438,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude agents, each in its own worktree. Per-child `fork_session` for context inheritance. |
+| `fork_wave` | root, tl | Fork N parallel Claude agents, each in its own worktree. Context inherited by default (`fork_session` defaults to `true`). |
 | `spawn_gemini` | root, tl | Spawn Gemini agent in own worktree+branch. Structured spec fields: steps, verify, boundary, context, read_first. |
 | `spawn_worker` | root, tl | Spawn ephemeral Gemini worker in tmux pane (no branch, no PR). Just name + task. |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
@@ -576,7 +578,7 @@ The recursive execution pattern. Every TL at every level follows this protocol:
    - Commit and push. Children fork from this commit.
 
 2. **Fork** — Spawn wave N children. Zero deps between siblings in the same wave.
-   - Sub-TLs: `fork_wave` (Claude, `fork_session: true` for context inheritance) — they already know the plan
+   - Sub-TLs: `fork_wave` (Claude, context inherited by default) — they already know the plan
    - Devs: `spawn_gemini` (Gemini, worktree+PR) — they get CLAUDE.md from scaffolding
    - Workers: `spawn_worker` (Gemini, ephemeral pane) — research or non-conflicting edits
 

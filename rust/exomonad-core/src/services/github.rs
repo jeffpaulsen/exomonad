@@ -24,10 +24,15 @@ pub fn build_octocrab() -> Result<Octocrab> {
         ));
     }
 
-    let client = OctocrabBuilder::new()
-        .personal_token(token)
-        .build()
-        .context("Failed to build Octocrab client")?;
+    let mut builder = OctocrabBuilder::new().personal_token(token);
+
+    if let Ok(base_url) = std::env::var("GITHUB_API_URL") {
+        builder = builder
+            .base_uri(&base_url)
+            .context("Invalid GITHUB_API_URL")?;
+    }
+
+    let client = builder.build().context("Failed to build Octocrab client")?;
 
     Ok(client)
 }
@@ -377,7 +382,13 @@ impl GitHubService {
     ///
     /// Returns an error if the octocrab client fails to initialize.
     pub fn new(token: String) -> Result<Self> {
-        let client = OctocrabBuilder::new().personal_token(token).build()?;
+        let mut builder = OctocrabBuilder::new().personal_token(token);
+        if let Ok(base_url) = std::env::var("GITHUB_API_URL") {
+            builder = builder
+                .base_uri(&base_url)
+                .context("Invalid GITHUB_API_URL")?;
+        }
+        let client = builder.build()?;
         Ok(Self { client })
     }
 

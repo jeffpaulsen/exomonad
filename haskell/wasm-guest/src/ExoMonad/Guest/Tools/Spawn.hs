@@ -127,7 +127,7 @@ instance JsonSchema ForkWaveChild where
       genericToolSchemaWith @ForkWaveChild
         [ ("slug", "Branch name suffix (will be prefixed with current branch)"),
           ("task", "One-line task description — the child inherits your full context, so keep it brief"),
-          ("fork_session", "Inherit parent conversation context via --fork-session (default: false). Set true only when the child needs full context; omit for fresh-start children.")
+          ("fork_session", "Inherit parent conversation context via --fork-session (default: true). Set false to start the child with a fresh context window.")
         ]
 
 data ForkWaveArgs = ForkWaveArgs
@@ -147,7 +147,7 @@ data ForkWaveResult = ForkWaveResult
 
 -- | Shared tool description for fork_wave.
 forkWaveDescription :: Text
-forkWaveDescription = "Fork any number of parallel Claude agents. Each starts in a worktree branched off your branch. Set fork_session: true on a child to inherit your full context window (useful when the child needs no re-orientation). Requires clean git state (committed and pushed). IMPORTANT: Create a team using TeamCreate BEFORE calling."
+forkWaveDescription = "Fork any number of parallel Claude agents. Each starts in a worktree branched off your branch. Children inherit your full context window by default (fork_session defaults to true). Set fork_session: false for children that need a fresh start. Requires clean git state (committed and pushed). IMPORTANT: Create a team using TeamCreate BEFORE calling."
 
 -- | Shared tool schema for fork_wave.
 forkWaveSchema :: Aeson.Object
@@ -183,7 +183,7 @@ forkWaveCore args = do
             let cfg = AC.SpawnSubtreeConfig
                   { AC.stcTask = fwcTask child
                   , AC.stcBranchName = fwcSlug child
-                  , AC.stcForkSession = fromMaybe False (fwcForkSession child)
+                  , AC.stcForkSession = fromMaybe True (fwcForkSession child)
                   , AC.stcRole = Nothing
                   , AC.stcAgentType = AC.Claude
                   , AC.stcPerms = AC.defaultPermFlags

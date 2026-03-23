@@ -60,6 +60,7 @@ project_dir = "."
 shell_command = "nix develop"  # environment wrapper for TL tab + server
 wasm_dir = ".exo/wasm"        # project-local default
 wasm_name = "devswarm"        # auto-detected from .exo/roles/ if exactly one exists
+model = "sonnet"              # optional — --model flag for root TL agent
 ```
 
 **Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing.

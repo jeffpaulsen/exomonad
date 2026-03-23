@@ -10,7 +10,7 @@ Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` an
 
 | Tool | Role | What it does |
 |------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, optional context inheritance via `fork_session`) |
+| `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, context inherited by default via `fork_session`) |
 | `spawn_gemini` | root, tl | Spawn Gemini agent: `worktree` (branch+PR), `inline` (ephemeral pane), `standalone` (own repo) |
 | `file_pr` | tl, dev | Create/update PR (base branch auto-detected from branch naming) |
 | `merge_pr` | root, tl | Merge a child's PR |

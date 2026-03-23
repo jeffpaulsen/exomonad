@@ -2,6 +2,7 @@
 
 module ExoMonad.Guest.Effects.StopHook
   ( checkUncommittedWork,
+    checkPRNotFiled,
     getCurrentBranch,
     getAgentId,
   )
@@ -12,7 +13,9 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Git qualified as Git
-import ExoMonad.Effects.Git (GitGetBranch, GitGetStatus, GitHasUnpushedCommits)
+import Effects.Github qualified as GH
+import ExoMonad.Effects.Git (GitGetBranch, GitGetRepoInfo, GitGetStatus, GitHasUnpushedCommits)
+import ExoMonad.Effects.GitHub (GitHubGetPullRequestForBranch)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect)
 import ExoMonad.Types (Effects)
 import System.Environment (lookupEnv)
@@ -36,6 +39,27 @@ checkUncommittedWork branch = do
     else if hasUnpushed
       then pure $ Just $ "Commits on " <> branch <> " aren't in a PR yet. File a PR before stopping."
       else pure Nothing
+
+-- | Check if the agent is on a non-main branch with no PR filed.
+-- Returns a nudge message if so. This catches agents that exit without
+-- filing a PR for their work.
+checkPRNotFiled :: Text -> Eff Effects (Maybe Text)
+checkPRNotFiled branch = do
+  repoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
+  case repoResult of
+    Left _ -> pure Nothing  -- can't determine repo, don't block
+    Right repoInfo -> do
+      let owner = Git.getRepoInfoResponseOwner repoInfo
+          repo = Git.getRepoInfoResponseName repoInfo
+      prResult <- suspendEffect @GitHubGetPullRequestForBranch
+        (GH.GetPullRequestForBranchRequest
+          { GH.getPullRequestForBranchRequestOwner = owner
+          , GH.getPullRequestForBranchRequestRepo = repo
+          , GH.getPullRequestForBranchRequestBranch = TL.fromStrict branch
+          })
+      case prResult of
+        Right resp | GH.getPullRequestForBranchResponseFound resp -> pure Nothing
+        _ -> pure $ Just $ "No PR filed for branch " <> branch <> ". File a PR with file_pr before stopping."
 
 -- ============================================================================
 -- Agent Identity Helpers

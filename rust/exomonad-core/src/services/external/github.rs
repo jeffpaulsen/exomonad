@@ -43,13 +43,17 @@ pub struct GitHubService {
 impl GitHubService {
     /// Create a new GitHub service with the given personal access token.
     pub fn new(token: String) -> Result<Self, ServiceError> {
-        let client = OctocrabBuilder::new()
-            .personal_token(token)
-            .build()
-            .map_err(|e| ServiceError::Api {
-                code: 500,
-                message: format!("Failed to build Octocrab client: {}", e),
+        let mut builder = OctocrabBuilder::new().personal_token(token);
+        if let Ok(base_url) = std::env::var("GITHUB_API_URL") {
+            builder = builder.base_uri(&base_url).map_err(|e| ServiceError::Api {
+                code: 400,
+                message: format!("Invalid GITHUB_API_URL: {}", e),
             })?;
+        }
+        let client = builder.build().map_err(|e| ServiceError::Api {
+            code: 500,
+            message: format!("Failed to build Octocrab client: {}", e),
+        })?;
         Ok(Self { client })
     }
 

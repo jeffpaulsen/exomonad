@@ -5,12 +5,12 @@ module TLStopCheck (tlStopCheck) where
 
 import Control.Monad.Freer (Eff)
 import ExoMonad.Guest.StateMachine (StopCheckResult(..), checkExit)
-import ExoMonad.Guest.Effects.StopHook (checkUncommittedWork, getCurrentBranch)
+import ExoMonad.Guest.Effects.StopHook (checkUncommittedWork, checkPRNotFiled, getCurrentBranch)
 import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse)
 import ExoMonad.Types (Effects)
 import TLPhase (TLPhase (..), TLEvent (..))
 
--- | Standard TL stop check: blocks if PR filed, nudges if children pending or uncommitted work.
+-- | Standard TL stop check: blocks if PR filed, nudges if children pending, uncommitted work, or no PR.
 tlStopCheck :: Eff Effects StopHookOutput
 tlStopCheck = do
   branch <- getCurrentBranch
@@ -22,7 +22,11 @@ tlStopCheck = do
         MustBlock msg -> pure $ blockStopResponse msg
         ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
         Clean -> do
-          nudge <- checkUncommittedWork branch
-          case nudge of
+          uncommitted <- checkUncommittedWork branch
+          case uncommitted of
             Just msg -> pure $ StopHookOutput Allow (Just msg)
-            Nothing -> pure allowStopResponse
+            Nothing -> do
+              noPR <- checkPRNotFiled branch
+              case noPR of
+                Just msg -> pure $ StopHookOutput Allow (Just msg)
+                Nothing -> pure allowStopResponse

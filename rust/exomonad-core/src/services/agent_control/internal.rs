@@ -493,6 +493,44 @@ impl AgentControlService {
         Ok(())
     }
 
+    /// Pre-trust a directory for Gemini CLI by adding it to `~/.gemini/trustedFolders.json`.
+    ///
+    /// This prevents the interactive "Trust this folder?" dialog that blocks Gemini agents.
+    pub(crate) async fn gemini_trust_folder(path: &Path) {
+        let Some(home) = dirs::home_dir() else {
+            warn!("Could not determine home directory for Gemini trust");
+            return;
+        };
+        let trust_file = home.join(".gemini").join("trustedFolders.json");
+        let abs_path = match path.canonicalize() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(_) => path.to_string_lossy().to_string(),
+        };
+
+        let mut trust_map: serde_json::Map<String, serde_json::Value> = if trust_file.exists() {
+            match tokio::fs::read_to_string(&trust_file).await {
+                Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+                Err(_) => serde_json::Map::new(),
+            }
+        } else {
+            serde_json::Map::new()
+        };
+
+        if trust_map.contains_key(&abs_path) {
+            return;
+        }
+
+        trust_map.insert(abs_path.clone(), serde_json::Value::String("TRUST_FOLDER".to_string()));
+
+        if let Ok(content) = serde_json::to_string_pretty(&trust_map) {
+            if let Err(e) = tokio::fs::write(&trust_file, content).await {
+                warn!(path = %abs_path, error = %e, "Failed to write Gemini trustedFolders.json");
+            } else {
+                info!(path = %abs_path, "Pre-trusted folder for Gemini CLI");
+            }
+        }
+    }
+
     /// Symlink server socket into worktree so agents find it without walk-up.
     pub(crate) async fn create_socket_symlink(&self, worktree_path: &Path) {
         let source = self.project_dir.join(".exo/server.sock");
