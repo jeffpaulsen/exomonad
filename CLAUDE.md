@@ -224,11 +224,16 @@ args = []
 # Companion agents spawned alongside the root TL during init.
 [[companions]]
 name = "sleeptime"
-agent_type = "claude"          # claude | gemini | shoal
+agent_type = "claude"          # claude | gemini | shoal | process
 role = "sleeptime"             # WASM role for MCP tools (default: "worker")
 command = "claude --dangerously-skip-permissions"
 task = "You are sleeptime"     # optional — omit for interactive session
 model = "haiku"                # optional — passed as --model flag to companion
+
+[[companions]]
+name = "mock-github"
+agent_type = "process"         # plain process: no MCP, no worktree, no agent identity
+command = "python3 tests/e2e/mock_github.py --port 9876"
 ```
 
 **Config hierarchy:**
@@ -258,6 +263,8 @@ Each Claude companion worktree contains:
 - `.git` — worktree git file pointing to the main repo
 
 Worktrees persist across `--recreate` (only the tmux session is torn down). Gemini/Shoal companions use their existing env-var/flag-based config approach.
+
+**Process companions** (`agent_type = "process"`) are plain long-running processes — no MCP config, no agent identity, no worktree, no hooks. Just a command in a tmux window. Use for mock servers, log tailers, or any background process that should live alongside the session.
 
 ---
 

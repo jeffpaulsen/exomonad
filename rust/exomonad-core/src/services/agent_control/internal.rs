@@ -196,7 +196,7 @@ impl AgentControlService {
                     String::new()
                 }
             }
-            AgentType::Shoal => String::new(),
+            AgentType::Shoal | AgentType::Process => String::new(),
         };
 
         let agent_command = match (prompt_file, fork_session_id) {
@@ -483,6 +483,7 @@ impl AgentControlService {
                 fs::write(gemini_dir.join("settings.json"), mcp_content).await?;
                 info!(agent_dir = %agent_dir.display(), role = %role, "Wrote .gemini/settings.json for Gemini agent");
             }
+            AgentType::Process => {} // No MCP config for process companions
             AgentType::Shoal => {
                 let exo_dir = agent_dir.join(".exo");
                 fs::create_dir_all(&exo_dir).await?;
@@ -642,6 +643,7 @@ impl AgentControlService {
                 "args": ["mcp-stdio", "--role", role, "--name", name]
             }))
             .unwrap(),
+            AgentType::Process => String::new(),
         }
     }
 

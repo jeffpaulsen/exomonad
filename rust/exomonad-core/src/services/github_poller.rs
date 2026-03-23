@@ -352,6 +352,7 @@ impl GitHubPoller {
             AgentType::Claude => "tl",
             AgentType::Gemini => "dev",
             AgentType::Shoal => "dev",
+            AgentType::Process => return Ok(None), // Process companions don't have WASM handlers
         };
 
         tracing::Span::current().record("role", role);

@@ -44,15 +44,14 @@ echo ">>> [Phase 1] Creating temp environment..."
 WORK_DIR="$(mktemp -d /tmp/exomonad-e2e.XXXXXXXX)"
 echo "  Work dir: $WORK_DIR"
 
-MOCK_PID=""
+# Pick ephemeral port + define mock paths (needed before config writing)
+MOCK_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+MOCK_LOG="$WORK_DIR/mock_github.log"
+MOCK_STDOUT="$WORK_DIR/mock_github_stdout.log"
+
 cleanup() {
     echo ""
     echo ">>> [Cleanup] Tearing down..."
-    if [[ -n "$MOCK_PID" ]] && kill -0 "$MOCK_PID" 2>/dev/null; then
-        kill "$MOCK_PID" 2>/dev/null || true
-        wait "$MOCK_PID" 2>/dev/null || true
-        echo "  Killed mock GitHub API (PID $MOCK_PID)"
-    fi
     # Clean up tmux global env vars
     for var in GITHUB_API_URL MOCK_LOG GH_MOCK_LOG REMOTE_DIR MOCK_PORT E2E_SCRIPT_DIR MOCK_STDOUT; do
         tmux set-environment -gu "$var" 2>/dev/null || true
@@ -113,7 +112,8 @@ EOF
 fi
 
 # Set session name, root TL model, poller interval, and companion config
-cat >> .exo/config.toml <<'EOF'
+# Note: unquoted heredoc so shell vars expand in the mock-github companion command
+cat >> .exo/config.toml <<EOF
 tmux_session = "e2e-test"
 model = "sonnet"
 yolo = true
@@ -126,6 +126,11 @@ role = "testrunner"
 model = "haiku"
 command = "claude --dangerously-skip-permissions"
 task = "Execute the test plan from your role context. Start immediately."
+
+[[companions]]
+name = "mock-github"
+agent_type = "process"
+command = "REMOTE_DIR=$REMOTE_DIR MOCK_LOG=$MOCK_LOG python3 $SCRIPT_DIR/mock_github.py --port $MOCK_PORT > $MOCK_STDOUT 2>&1"
 EOF
 
 # Create e2e test mode rule for the root TL
@@ -192,36 +197,9 @@ EOF
 echo "  Repo: $REPO_DIR"
 echo "  Remote: $REMOTE_DIR"
 
-# --- Phase 2: Start mock GitHub API ---
+# --- Phase 2: Set environment ---
 
-echo ">>> [Phase 2] Starting mock GitHub API..."
-
-# Pick ephemeral port
-MOCK_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-export MOCK_LOG="$WORK_DIR/mock_github.log"
-
-MOCK_STDOUT="$WORK_DIR/mock_github_stdout.log"
-REMOTE_DIR="$REMOTE_DIR" MOCK_LOG="$MOCK_LOG" python3 "$SCRIPT_DIR/mock_github.py" --port "$MOCK_PORT" \
-    > "$MOCK_STDOUT" 2>&1 &
-MOCK_PID=$!
-
-# Poll until responsive
-for i in $(seq 1 20); do
-    if curl -sf "http://127.0.0.1:$MOCK_PORT/repos/test/repo/pulls" &>/dev/null; then
-        echo "  Mock GitHub API listening on port $MOCK_PORT (PID $MOCK_PID)"
-        break
-    fi
-    if [[ $i -eq 20 ]]; then
-        echo "ERROR: Mock GitHub API failed to start. Output:"
-        cat "$MOCK_STDOUT" 2>/dev/null || true
-        exit 1
-    fi
-    sleep 0.25
-done
-
-# --- Phase 3: Set environment ---
-
-echo ">>> [Phase 3] Configuring environment..."
+echo ">>> [Phase 2] Configuring environment..."
 
 export PATH="$SCRIPT_DIR:$PATH"
 export GITHUB_TOKEN="test-token-e2e"
@@ -244,9 +222,9 @@ echo "  GH_MOCK_LOG=$GH_MOCK_LOG"
 echo "  MOCK_LOG=$MOCK_LOG"
 echo "  REMOTE_DIR=$REMOTE_DIR"
 
-# --- Phase 4: Run exomonad init ---
+# --- Phase 3: Run exomonad init ---
 
-echo ">>> [Phase 4] Launching exomonad init..."
+echo ">>> [Phase 3] Launching exomonad init..."
 
 # Copy helper scripts into repo for convenience
 cp "$SCRIPT_DIR/validate.sh" "$WORK_DIR/repo/validate.sh" 2>/dev/null || true
@@ -268,5 +246,7 @@ echo "  to verify the pipeline."
 echo "============================================"
 echo ""
 
-# Launch exomonad init — creates tmux session and attaches
+# Launch exomonad init — creates tmux session (with mock-github companion) and attaches.
+# The mock-github process companion starts during init in its own tmux window.
+# Init attaches to tmux as the final step, so this must be the last command.
 "$EXOMONAD_BIN" init --session e2e-test

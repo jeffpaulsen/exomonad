@@ -450,6 +450,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             (AgentType::Gemini, None) => format!("gemini{model_flag}"),
             (AgentType::Shoal, Some(prompt)) => format!("shoal-agent --exo root --prompt '{}'", prompt.replace('\'', "'\\''")),
             (AgentType::Shoal, None) => "shoal-agent --exo root".to_string(),
+            (AgentType::Process, _) => unreachable!("Process is for companions only, not root agent"),
         }
     };
 
@@ -489,6 +490,17 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                 AgentType::Claude
             }
         };
+
+        // Process companions: plain command in a tmux window, no agent infrastructure
+        if agent_type == AgentType::Process {
+            info!(name = %companion.name, agent_type = ?agent_type, "Spawning companion process");
+            let companion_cmd = &companion.command;
+            let window_id = ipc
+                .new_window(&companion.name, &cwd, &shell, companion_cmd)
+                .await?;
+            info!(name = %companion.name, window = %window_id.as_str(), "Companion process spawned");
+            continue;
+        }
 
         info!(name = %companion.name, role = %companion.role, agent_type = ?agent_type, "Spawning companion agent");
 
@@ -676,7 +688,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                     )?;
                 }
                 AgentType::Shoal => {}
-                AgentType::Claude => unreachable!(),
+                AgentType::Claude | AgentType::Process => unreachable!(),
             }
 
             cwd.clone()
@@ -727,6 +739,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                 };
                 format!("{env_prefix}{}{}", companion.command, task_part)
             }
+            AgentType::Process => unreachable!("Process companions handled above"),
         };
         let window_id = ipc
             .new_window(&companion.name, &companion_cwd, &shell, &companion_cmd)

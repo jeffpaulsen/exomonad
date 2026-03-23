@@ -85,6 +85,10 @@ pub enum AgentType {
 
     /// Custom binary agent (e.g., shoal-agent).
     Shoal,
+
+    /// Plain long-running process (no MCP, no agent identity, no worktree).
+    /// Used for companion processes like mock servers, log tailers, etc.
+    Process,
 }
 
 /// Static metadata for each agent type, replacing per-method match dispatch.
@@ -116,12 +120,20 @@ pub(crate) const SHOAL_META: AgentMetadata = AgentMetadata {
     emoji: "\u{1F30A}", // 🌊
 };
 
+pub(crate) const PROCESS_META: AgentMetadata = AgentMetadata {
+    command: "",
+    prompt_flag: "",
+    suffix: "process",
+    emoji: "\u{2699}\u{FE0F}", // ⚙️
+};
+
 impl AgentType {
     pub(crate) fn meta(&self) -> &'static AgentMetadata {
         match self {
             AgentType::Claude => &CLAUDE_META,
             AgentType::Gemini => &GEMINI_META,
             AgentType::Shoal => &SHOAL_META,
+            AgentType::Process => &PROCESS_META,
         }
     }
 
@@ -159,6 +171,8 @@ impl AgentType {
             AgentType::Claude
         } else if dir_name.ends_with("-shoal") {
             AgentType::Shoal
+        } else if dir_name.ends_with("-process") {
+            AgentType::Process
         } else {
             AgentType::Gemini
         }
@@ -775,6 +789,7 @@ mod tests {
             "claude" => Some(super::AgentType::Claude),
             "gemini" => Some(super::AgentType::Gemini),
             "shoal" => Some(super::AgentType::Shoal),
+            "process" => Some(super::AgentType::Process),
             _ => None,
         };
         Some(ParsedAgentDirName {

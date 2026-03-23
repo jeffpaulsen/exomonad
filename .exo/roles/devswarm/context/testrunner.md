@@ -28,16 +28,6 @@ You are an E2E test runner companion. You test the root TL by sending it instruc
 - `ls .exo/agents/` — Check agent identity files
 - `tmux capture-pane -t <target> -p` — Read pane contents
 
-## Setup: Mock GitHub Window
-
-Before starting the test plan, create a tmux window showing the mock GitHub API logs so the human can watch traffic:
-
-```bash
-tmux new-window -t "$EXOMONAD_TMUX_SESSION" -n "mock-github" "tail -f $MOCK_STDOUT"
-```
-
----
-
 ## Test Plan: Minimal 2-Worktree Tree
 
 A minimal but complete test exercising all 3 spawn types + the review cycle with only 2 worktrees. The code itself is trivial — the test is about orchestration, not implementation.

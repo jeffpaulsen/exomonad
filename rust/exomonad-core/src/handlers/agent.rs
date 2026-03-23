@@ -744,6 +744,7 @@ fn service_agent_type_to_proto(at: ServiceAgentType) -> i32 {
         ServiceAgentType::Claude => AgentType::Claude as i32,
         ServiceAgentType::Gemini => AgentType::Gemini as i32,
         ServiceAgentType::Shoal => AgentType::Shoal as i32,
+        ServiceAgentType::Process => AgentType::Unspecified as i32,
     }
 }
 
@@ -752,6 +753,7 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         Some(ServiceAgentType::Claude) => AgentType::Claude as i32,
         Some(ServiceAgentType::Gemini) => AgentType::Gemini as i32,
         Some(ServiceAgentType::Shoal) => AgentType::Shoal as i32,
+        Some(ServiceAgentType::Process) => AgentType::Unspecified as i32,
         None => AgentType::Unspecified as i32,
     };
 

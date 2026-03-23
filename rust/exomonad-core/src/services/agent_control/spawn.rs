@@ -72,6 +72,7 @@ impl AgentControlService {
                 AgentType::Claude => "tl",
                 AgentType::Gemini => "dev",
                 AgentType::Shoal => "shoal",
+                AgentType::Process => unreachable!("Process agents are not spawned via effects"),
             };
             self.write_agent_mcp_config(
                 &effective_project_dir,
@@ -597,7 +598,7 @@ impl AgentControlService {
                             Err(e) => warn!(role = %role, error = %e, "Failed to copy Gemini role context (non-fatal)"),
                         }
                     }
-                    AgentType::Shoal => {} // Shoal agents use their own context mechanism
+                    AgentType::Shoal | AgentType::Process => {}
                 }
             }
 
