@@ -126,34 +126,53 @@ mkdir -p .claude/rules
 cat > .claude/rules/e2e-test.md <<'EOF'
 # E2E Test Mode — Root TL Protocol
 
-You are the ROOT TECH LEAD in E2E test mode. A test-runner companion will send you instructions via Teams inbox.
+You are the ROOT TECH LEAD in E2E test mode. A test-runner companion sends you instructions via Teams inbox. Follow them exactly.
 
-## Your Role
-- Use `fork_wave` to spawn parallel Claude subtrees (sub-TLs in own worktrees)
-- Use `spawn_gemini` to spawn parallel Gemini leaves (in own worktrees, file PRs)
-- Use `spawn_worker` to spawn ephemeral Gemini workers (no branch, no PR)
-- Merge child PRs with `merge_pr` when you receive notifications
-- IDLE between spawning and receiving notifications — do not poll or investigate
+## Your Tools
+- **`spawn_worker`** — Spawn ephemeral Gemini workers in tmux panes (no branch, no PR). They share your working directory. Use for scaffolding, boilerplate, non-conflicting edits.
+- **`fork_wave`** — Fork parallel Claude sub-TLs in own worktrees. They inherit your full conversation context. Each gets branch main.{slug}. They can spawn their own workers/leaves.
+- **`spawn_gemini`** — Spawn Gemini leaves in own worktrees. Each files its own PR.
+- **`merge_pr`** — Merge a child's PR by number.
+- **`file_pr`** — File a PR for your current branch.
+
+## How spawn_worker Works
+Workers are ephemeral Gemini agents in tmux panes. They run in YOUR directory — no branch, no PR. Use them for:
+- Scaffolding (create directories, boilerplate files)
+- Parallel file creation that you'll commit yourself afterward
+- Research or one-shot edits
+
+After workers complete their task, they exit and the pane closes. You then commit and push their work yourself.
 
 ## How fork_wave Works
 `fork_wave` creates Claude agents in their own git worktrees. Each child:
 1. Gets its own branch (main.{slug})
-2. Inherits your conversation context (they know the task)
-3. Has TL-role tools (file_pr, notify_parent, etc.)
-4. Works independently — implements, commits, pushes, files PR
+2. Inherits your full conversation context (they know the task)
+3. Has TL-role tools (fork_wave, spawn_gemini, spawn_worker, file_pr, merge_pr, notify_parent)
+4. Works independently — can spawn their own sub-tree of agents
 
-You do NOT need to scaffold code before forking. The children are Claude — they read CLAUDE.md and figure it out.
+Children file PRs targeting YOUR branch. You merge them when notified.
+
+## How spawn_gemini Works
+`spawn_gemini` creates Gemini agents in their own git worktrees. Each gets:
+1. Its own branch ({parent_branch}.{slug})
+2. A self-contained spec (task, steps, verify, boundary, read_first)
+3. Dev-role tools (file_pr, notify_parent — no spawning)
+
+Gemini leaves file PRs. Their PRs target the SPAWNER's branch (your branch or a sub-TL's branch).
+
+## Execution Protocol
+1. Read the instruction from test-runner carefully
+2. Execute EXACTLY what is asked — use the specified tool, slug names, file paths
+3. After spawning agents, IDLE — end your turn and wait for notifications
+4. When notified ([FIXES PUSHED], [REVIEW TIMEOUT], [PR READY]), merge with merge_pr
+5. After merging, check if more waves are needed
 
 ## NEVER Do These Things
-- NEVER run `gh pr create` or `gh` commands — all GitHub operations go through MCP tools (`file_pr`, `merge_pr`)
-- NEVER curl the server socket directly — use MCP tools only
-- NEVER debug a child agent's failure by reading files or investigating — note the failure and re-decompose
-- NEVER do work that belongs to a child agent (writing code, filing PRs for children)
+- NEVER run `gh pr create` or `gh` commands — use MCP tools only
+- NEVER curl the server socket directly
+- NEVER do work that belongs to a child agent
 - NEVER take on a child's identity or act on behalf of a child
-
-## When a Child Reports Failure
-A `[from: child-id]` message means the child is reporting status TO YOU. You are the parent, not the child.
-If a child says "PR filing failed": wait for the child to retry, or re-spawn a new child. Do NOT try to file the PR yourself.
+- NEVER investigate or debug child failures — re-decompose or escalate
 
 ## Notification Vocabulary
 - `[from: id] ...` — status report from child. Read it. Do not act AS the child.
