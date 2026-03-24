@@ -1,8 +1,10 @@
 use crate::paths;
+use crate::file_lock::{FileLock, fsync_dir};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 use tracing::{debug, info};
 
 /// Message in a Claude Code Teams inbox file.
@@ -46,6 +48,8 @@ pub(crate) fn write_to_inbox_at_base(
 
     let inbox_file = inbox_dir.join(format!("{}.json", recipient));
 
+    let _lock = FileLock::acquire(&inbox_file, Duration::from_secs(30))?;
+
     let mut messages: Vec<TeamsMessage> = if inbox_file.exists() {
         let content = std::fs::read_to_string(&inbox_file)?;
         serde_json::from_str(&content).unwrap_or_default()
@@ -74,9 +78,14 @@ pub(crate) fn write_to_inbox_at_base(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
     // Atomic write: temp file + rename
-    let tmp_file = inbox_dir.join(format!(".{}.json.tmp", recipient));
+    let thread_id = format!("{:?}", std::thread::current().id());
+    let tmp_file = inbox_dir.join(format!(".{}.{}.{}.json.tmp", recipient, Utc::now().timestamp_nanos_opt().unwrap_or(0), thread_id));
     std::fs::write(&tmp_file, &json)?;
     std::fs::rename(&tmp_file, &inbox_file)?;
+
+    if let Err(e) = fsync_dir(&inbox_dir) {
+        debug!(error = %e, "fsync on inbox dir failed");
+    }
 
     debug!(bytes = json.len(), "Teams inbox write complete");
     Ok(timestamp)
@@ -192,5 +201,49 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert_eq!(unread.len(), 1);
         assert_eq!(unread[0].text, "msg2");
+    }
+
+    #[test]
+    fn test_concurrent_writes_no_lost_messages() {
+        use std::sync::Arc;
+        let tmp = tempdir().unwrap();
+        let base = Arc::new(tmp.path().to_path_buf());
+        let team = "test-team";
+        let recipient = "lead";
+
+        // Pre-create the directory to avoid races in create_dir_all
+        let inbox_dir = paths::inbox_dir_at(&base, team);
+        std::fs::create_dir_all(&inbox_dir).unwrap();
+
+        let mut handles = vec![];
+        for i in 0..10 {
+            let base = Arc::clone(&base);
+            let handle = std::thread::spawn(move || {
+                write_to_inbox_at_base(
+                    &base,
+                    team,
+                    recipient,
+                    &format!("agent-{}", i),
+                    &format!("message-{}", i),
+                    "summary",
+                )
+            });
+            handles.push(handle);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let inbox_file = inbox_dir.join(format!("{}.json", recipient));
+        let content = std::fs::read_to_string(&inbox_file).unwrap();
+        let messages: Vec<TeamsMessage> = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(messages.len(), 10);
+        for i in 0..10 {
+            let msg_exists = messages.iter().any(|m| m.text == format!("message-{}", i));
+            assert!(msg_exists, "Message {} missing", i);
+        }
     }
 }
