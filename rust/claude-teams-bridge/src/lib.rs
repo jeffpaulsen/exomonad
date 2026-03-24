@@ -5,6 +5,7 @@
 
 mod config;
 mod discovery;
+pub mod file_lock;
 mod inbox;
 mod paths;
 mod registry;
