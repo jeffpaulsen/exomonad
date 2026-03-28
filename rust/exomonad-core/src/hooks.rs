@@ -158,7 +158,9 @@ impl HookConfig {
         // is a symlink to .exo/roles/{wasm}/context/{role}.md — we must exclude
         // the canonical target path, not just .claude/rules/**.
         if let Some(parent_dir) = parent_project_dir {
-            let canonical = parent_dir.canonicalize().unwrap_or(parent_dir.to_path_buf());
+            let canonical = parent_dir
+                .canonicalize()
+                .unwrap_or(parent_dir.to_path_buf());
             let parent = canonical.to_string_lossy();
             settings["claudeMdExcludes"] = json!([
                 format!("{}/CLAUDE.md", parent),

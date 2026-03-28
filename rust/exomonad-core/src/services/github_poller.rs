@@ -347,13 +347,13 @@ impl GitHubPoller {
                     let next_retry_secs = if consecutive_failures == 0 {
                         base_interval.as_secs()
                     } else {
-                        let backoff = base_interval * 2u32.saturating_pow(consecutive_failures.min(6));
+                        let backoff =
+                            base_interval * 2u32.saturating_pow(consecutive_failures.min(6));
                         backoff.min(max_backoff).as_secs()
                     };
                     warn!(
                         consecutive_failures,
-                        next_retry_secs,
-                        "GitHub poller cycle failed: {}", e
+                        next_retry_secs, "GitHub poller cycle failed: {}", e
                     );
                 }
             }

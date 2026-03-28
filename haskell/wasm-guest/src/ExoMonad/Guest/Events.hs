@@ -17,8 +17,8 @@ import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
-import GHC.Generics (Generic)
 import ExoMonad.Guest.Types (Effects)
+import GHC.Generics (Generic)
 
 -- | PR review event types
 data PRReviewEvent
@@ -108,7 +108,7 @@ instance ToJSON SiblingMergedEvent where
 -- | Event handler return type
 data EventAction
   = InjectMessage Text
-  | NotifyParentAction { naMessage :: Text, naPrNumber :: Int }
+  | NotifyParentAction {naMessage :: Text, naPrNumber :: Int}
   | NoAction
   deriving (Show, Generic)
 

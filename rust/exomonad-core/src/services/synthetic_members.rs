@@ -1,6 +1,6 @@
 use crate::domain::TeamName;
 use anyhow::{Context, Result};
-use claude_teams_bridge::file_lock::{FileLock, fsync_dir};
+use claude_teams_bridge::file_lock::{fsync_dir, FileLock};
 use serde_json::Value;
 use std::io::Write;
 use std::path::PathBuf;
@@ -26,8 +26,12 @@ fn register_synthetic_member_at_path(
     agent_type: &str,
 ) -> Result<()> {
     // Read existing config
-    let _lock = FileLock::acquire(config_path, Duration::from_secs(30))
-        .with_context(|| format!("Failed to acquire lock on team config: {}", config_path.display()))?;
+    let _lock = FileLock::acquire(config_path, Duration::from_secs(30)).with_context(|| {
+        format!(
+            "Failed to acquire lock on team config: {}",
+            config_path.display()
+        )
+    })?;
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read team config: {}", config_path.display()))?;
     let mut config: Value =
@@ -68,9 +72,9 @@ fn register_synthetic_member_at_path(
 
     // Atomic write: fsync temp file before persist for crash safety
     let content = serde_json::to_string_pretty(&config)?;
-    let tmp_dir = config_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("No parent dir for config path: {}", config_path.display()))?;
+    let tmp_dir = config_path.parent().ok_or_else(|| {
+        anyhow::anyhow!("No parent dir for config path: {}", config_path.display())
+    })?;
     let tmp = tempfile::NamedTempFile::new_in(tmp_dir)?;
     {
         let mut writer = std::io::BufWriter::new(tmp.as_file());
@@ -101,8 +105,12 @@ fn remove_synthetic_member_at_path(
     team_name: &TeamName,
     member_name: &str,
 ) -> Result<()> {
-    let _lock = FileLock::acquire(config_path, Duration::from_secs(30))
-        .with_context(|| format!("Failed to acquire lock on team config: {}", config_path.display()))?;
+    let _lock = FileLock::acquire(config_path, Duration::from_secs(30)).with_context(|| {
+        format!(
+            "Failed to acquire lock on team config: {}",
+            config_path.display()
+        )
+    })?;
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read team config: {}", config_path.display()))?;
     let mut config: Value =
@@ -114,9 +122,9 @@ fn remove_synthetic_member_at_path(
 
     // Atomic write: fsync temp file before persist for crash safety
     let content = serde_json::to_string_pretty(&config)?;
-    let tmp_dir = config_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("No parent dir for config path: {}", config_path.display()))?;
+    let tmp_dir = config_path.parent().ok_or_else(|| {
+        anyhow::anyhow!("No parent dir for config path: {}", config_path.display())
+    })?;
     let tmp = tempfile::NamedTempFile::new_in(tmp_dir)?;
     {
         let mut writer = std::io::BufWriter::new(tmp.as_file());

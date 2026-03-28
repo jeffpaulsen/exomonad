@@ -40,10 +40,10 @@ import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import GHC.Generics (Generic)
 import ExoMonad.Guest.Effects.AgentControl (AgentControl)
 import ExoMonad.Guest.Effects.FileSystem (FileSystem)
 import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
+import GHC.Generics (Generic)
 
 -- | Unified effect row for tools, hooks, and event handlers.
 type Effects = '[AgentControl, FileSystem, SuspendYield, IO]
@@ -322,9 +322,12 @@ blockStopResponse msg =
 -- | BeforeModel hook response (Gemini-specific).
 -- Can bypass the LLM call entirely with a synthetic response.
 data BeforeModelOutput
-  = BeforeModelAllow (Maybe Value)  -- ^ Allow with optional modified llm_request
-  | BeforeModelDeny Text            -- ^ Block the request
-  | BeforeModelSynthetic Value      -- ^ Bypass LLM, inject synthetic llm_response
+  = -- | Allow with optional modified llm_request
+    BeforeModelAllow (Maybe Value)
+  | -- | Block the request
+    BeforeModelDeny Text
+  | -- | Bypass LLM, inject synthetic llm_response
+    BeforeModelSynthetic Value
   deriving (Show, Generic)
 
 instance ToJSON BeforeModelOutput where
@@ -362,9 +365,12 @@ syntheticBeforeModel = BeforeModelSynthetic
 -- | AfterModel hook response (Gemini-specific).
 -- Fires per LLM response chunk. Can rewrite, discard, or halt.
 data AfterModelOutput
-  = AfterModelAllow (Maybe Value)   -- ^ Allow with optional rewritten llm_response chunk
-  | AfterModelDeny Text             -- ^ Discard this chunk with reason
-  | AfterModelHalt                  -- ^ Kill the agent loop (continue=false)
+  = -- | Allow with optional rewritten llm_response chunk
+    AfterModelAllow (Maybe Value)
+  | -- | Discard this chunk with reason
+    AfterModelDeny Text
+  | -- | Kill the agent loop (continue=false)
+    AfterModelHalt
   deriving (Show, Generic)
 
 instance ToJSON AfterModelOutput where

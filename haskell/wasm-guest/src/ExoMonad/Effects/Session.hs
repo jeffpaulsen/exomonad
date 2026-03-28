@@ -25,12 +25,14 @@ instance Effect SessionRegisterClaudeId where
 
 -- | Register Claude Teams info effect.
 data SessionRegisterTeam
+
 instance Effect SessionRegisterTeam where
   type Input SessionRegisterTeam = RegisterTeamRequest
   type Output SessionRegisterTeam = RegisterTeamResponse
   effectId = "session.register_team"
 
 data SessionDeregisterTeam
+
 instance Effect SessionDeregisterTeam where
   type Input SessionDeregisterTeam = DeregisterTeamRequest
   type Output SessionDeregisterTeam = DeregisterTeamResponse

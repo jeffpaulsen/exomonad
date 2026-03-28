@@ -24,13 +24,13 @@ import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import ExoMonad.Effects.KV (CleanupStalePhasesRequest (..), KVCleanupStalePhases)
 import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.Log qualified as Log
-import ExoMonad.Effects.KV (KVCleanupStalePhases, CleanupStalePhasesRequest (..))
 import ExoMonad.Effects.Session qualified as Session
-import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
-import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, BeforeModelOutput (..), AfterModelOutput (..), Effects, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
+import ExoMonad.Guest.Types (AfterModelOutput (..), BeforeModelOutput (..), Effects, HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
 -- | Role configuration.
@@ -97,8 +97,9 @@ defaultSessionStartHook hookInput = do
   let claudeUuid = case hiTranscriptPath hookInput >>= extractUuidFromTranscriptPath of
         Just uuid -> uuid
         Nothing -> hiSessionId hookInput
-  void $ suspendEffect_ @Session.SessionRegisterClaudeId
-    (Session.RegisterClaudeSessionRequest { Session.registerClaudeSessionRequestClaudeSessionId = TL.fromStrict claudeUuid })
+  void $
+    suspendEffect_ @Session.SessionRegisterClaudeId
+      (Session.RegisterClaudeSessionRequest {Session.registerClaudeSessionRequestClaudeSessionId = TL.fromStrict claudeUuid})
   void $ suspendEffect_ @KVCleanupStalePhases (CleanupStalePhasesRequest {})
   let instruction = "Create a team using TeamCreate before proceeding."
   pure $
@@ -107,7 +108,7 @@ defaultSessionStartHook hookInput = do
         stopReason = Nothing,
         suppressOutput = Nothing,
         systemMessage = Nothing,
-        hookSpecificOutput = Just $ SessionStartOutput { ssAdditionalContext = Just instruction }
+        hookSpecificOutput = Just $ SessionStartOutput {ssAdditionalContext = Just instruction}
       }
 
 -- | PostToolUse hook that registers the team after TeamCreate completes.
@@ -118,43 +119,55 @@ teamRegistrationPostToolUse hookInput =
   case hiToolName hookInput of
     Just "TeamCreate" -> do
       -- Log raw response for debugging team registration
-      void $ suspendEffect_ @Log.LogInfo
-        (Log.InfoRequest
-          { Log.infoRequestMessage = TL.fromStrict $
-              "[PostToolUse] TeamCreate tool_response: " <> T.pack (show (hiToolResponse hookInput)),
-            Log.infoRequestFields = ""
-          })
+      void $
+        suspendEffect_ @Log.LogInfo
+          ( Log.InfoRequest
+              { Log.infoRequestMessage =
+                  TL.fromStrict $
+                    "[PostToolUse] TeamCreate tool_response: " <> T.pack (show (hiToolResponse hookInput)),
+                Log.infoRequestFields = ""
+              }
+          )
       case extractTeamName (hiToolResponse hookInput) of
         Just teamName -> do
           let inboxName = "team-lead"
-          teamResult <- suspendEffect @Session.SessionRegisterTeam
-            (Session.RegisterTeamRequest
-              { Session.registerTeamRequestTeamName = TL.fromStrict teamName,
-                Session.registerTeamRequestInboxName = TL.fromStrict inboxName
-              })
+          teamResult <-
+            suspendEffect @Session.SessionRegisterTeam
+              ( Session.RegisterTeamRequest
+                  { Session.registerTeamRequestTeamName = TL.fromStrict teamName,
+                    Session.registerTeamRequestInboxName = TL.fromStrict inboxName
+                  }
+              )
           case teamResult of
             Left _err ->
-              void $ suspendEffect_ @Log.LogError
-                (Log.ErrorRequest
-                  { Log.errorRequestMessage = TL.fromStrict $ "[PostToolUse] registerTeam failed for team: " <> teamName,
-                    Log.errorRequestFields = ""
-                  })
+              void $
+                suspendEffect_ @Log.LogError
+                  ( Log.ErrorRequest
+                      { Log.errorRequestMessage = TL.fromStrict $ "[PostToolUse] registerTeam failed for team: " <> teamName,
+                        Log.errorRequestFields = ""
+                      }
+                  )
             Right _ ->
-              void $ suspendEffect_ @Log.LogInfo
-                (Log.InfoRequest
-                  { Log.infoRequestMessage = TL.fromStrict $ "[PostToolUse] Registered team: " <> teamName,
-                    Log.infoRequestFields = ""
-                  })
+              void $
+                suspendEffect_ @Log.LogInfo
+                  ( Log.InfoRequest
+                      { Log.infoRequestMessage = TL.fromStrict $ "[PostToolUse] Registered team: " <> teamName,
+                        Log.infoRequestFields = ""
+                      }
+                  )
         Nothing ->
-          void $ suspendEffect_ @Log.LogError
-            (Log.ErrorRequest
-              { Log.errorRequestMessage = "[PostToolUse] TeamCreate response missing team_name field",
-                Log.errorRequestFields = ""
-              })
+          void $
+            suspendEffect_ @Log.LogError
+              ( Log.ErrorRequest
+                  { Log.errorRequestMessage = "[PostToolUse] TeamCreate response missing team_name field",
+                    Log.errorRequestFields = ""
+                  }
+              )
       pure (postToolUseResponse Nothing)
     Just "TeamDelete" -> do
-      void $ suspendEffect_ @Session.SessionDeregisterTeam
-        Session.DeregisterTeamRequest
+      void $
+        suspendEffect_ @Session.SessionDeregisterTeam
+          Session.DeregisterTeamRequest
       pure (postToolUseResponse Nothing)
     _ -> pure (postToolUseResponse Nothing)
 
@@ -172,10 +185,11 @@ extractTeamName _ = Nothing
 
 -- | Compose two PostToolUse hooks sequentially.
 -- The first runs for side effects only; the second's output is returned.
-andThenPostToolUse :: (HookInput -> Eff Effects HookOutput)
-                   -> (HookInput -> Eff Effects HookOutput)
-                   -> HookInput
-                   -> Eff Effects HookOutput
+andThenPostToolUse ::
+  (HookInput -> Eff Effects HookOutput) ->
+  (HookInput -> Eff Effects HookOutput) ->
+  HookInput ->
+  Eff Effects HookOutput
 andThenPostToolUse first second input = do
   _ <- first input
   second input

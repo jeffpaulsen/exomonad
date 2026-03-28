@@ -112,11 +112,7 @@ impl TeamRegistry {
     }
 
     /// Batch lookup: get team info for two keys in a single lock acquisition.
-    pub async fn get_pair(
-        &self,
-        key1: &str,
-        key2: &str,
-    ) -> (Option<TeamInfo>, Option<TeamInfo>) {
+    pub async fn get_pair(&self, key1: &str, key2: &str) -> (Option<TeamInfo>, Option<TeamInfo>) {
         let map = self.inner.lock().await;
         (map.get(key1).cloned(), map.get(key2).cloned())
     }
@@ -266,7 +262,11 @@ mod tests {
         let results = reg.get_all_for_team("team-a").await;
         assert_eq!(results.len(), 2);
         let keys: Vec<&str> = results.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(keys, vec!["agent-1", "agent-2"], "entries must be sorted by key");
+        assert_eq!(
+            keys,
+            vec!["agent-1", "agent-2"],
+            "entries must be sorted by key"
+        );
     }
 
     #[tokio::test]
@@ -415,10 +415,7 @@ mod tests {
         )
         .await;
         // Even with a sender hint, Tier 1 (in-memory) wins
-        let result = reg
-            .resolve("agent-1", Some("other-team"))
-            .await
-            .unwrap();
+        let result = reg.resolve("agent-1", Some("other-team")).await.unwrap();
         assert_eq!(result.team_name, "in-memory-team");
     }
 

@@ -16,7 +16,7 @@ import Data.Aeson qualified as Aeson
 import ExoMonad.Guest.Continuations (newContinuationId, storeContinuation)
 import ExoMonad.Guest.Effects.AgentControl (runAgentControlSuspend)
 import ExoMonad.Guest.Effects.FileSystem (runFileSystemSuspend)
-import ExoMonad.Guest.Tool.Class (EffectRequest, MCPCallOutput, Effects, WasmResult (..))
+import ExoMonad.Guest.Tool.Class (EffectRequest, Effects, MCPCallOutput, WasmResult (..))
 
 -- | Run an effectful tool handler, converting to WasmResult.
 -- Handles both immediate completion and suspension with continuation storage.

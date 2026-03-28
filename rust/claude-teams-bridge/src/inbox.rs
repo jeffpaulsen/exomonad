@@ -1,5 +1,5 @@
+use crate::file_lock::{fsync_dir, FileLock};
 use crate::paths;
-use crate::file_lock::{FileLock, fsync_dir};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -156,13 +156,18 @@ pub(crate) fn compact_inbox_at_base(base: &Path, team: &str, recipient: &str) ->
     };
 
     // For idle notifications among kept read messages: keep only last 10 per sender
-    let (idle, non_idle): (Vec<_>, Vec<_>) = read_to_keep.into_iter().partition(is_idle_notification);
+    let (idle, non_idle): (Vec<_>, Vec<_>) =
+        read_to_keep.into_iter().partition(is_idle_notification);
     compacted.extend(non_idle);
 
     // Group idle by sender, keep last 10 each
-    let mut idle_by_sender: std::collections::HashMap<String, Vec<TeamsMessage>> = std::collections::HashMap::new();
+    let mut idle_by_sender: std::collections::HashMap<String, Vec<TeamsMessage>> =
+        std::collections::HashMap::new();
     for msg in idle {
-        idle_by_sender.entry(msg.from.clone()).or_default().push(msg);
+        idle_by_sender
+            .entry(msg.from.clone())
+            .or_default()
+            .push(msg);
     }
     for (_sender, mut msgs) in idle_by_sender {
         let len = msgs.len();
@@ -196,8 +201,7 @@ pub(crate) fn compact_inbox_at_base(base: &Path, team: &str, recipient: &str) ->
 }
 
 fn is_idle_notification(msg: &TeamsMessage) -> bool {
-    msg.summary.to_lowercase().contains("idle")
-        || msg.text.to_lowercase().contains("idle")
+    msg.summary.to_lowercase().contains("idle") || msg.text.to_lowercase().contains("idle")
 }
 
 /// Read all messages from an inbox.

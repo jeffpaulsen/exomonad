@@ -80,11 +80,11 @@ sanitizeBranch :: Text -> Text
 sanitizeBranch = T.replace "." "--"
 
 -- | KV key scoped by machine name and branch.
-scopedPhaseKey :: forall phase event. StateMachine phase event => Text -> Text
+scopedPhaseKey :: forall phase event. (StateMachine phase event) => Text -> Text
 scopedPhaseKey scope = "phase-" <> machineName @phase @event <> "--" <> sanitizeBranch scope
 
 -- | Read the current phase from KV.
-getPhase :: forall phase event. StateMachine phase event => Text -> Eff Effects (Maybe phase)
+getPhase :: forall phase event. (StateMachine phase event) => Text -> Eff Effects (Maybe phase)
 getPhase scope = do
   result <- suspendEffect @KVGet (KV.GetRequest {KV.getRequestKey = TL.fromStrict (scopedPhaseKey @phase @event scope)})
   case result of
@@ -97,7 +97,7 @@ getPhase scope = do
             Right phase -> pure (Just phase)
 
 -- | Set the current phase in KV.
-setPhase :: forall phase event. StateMachine phase event => Text -> phase -> Eff Effects ()
+setPhase :: forall phase event. (StateMachine phase event) => Text -> phase -> Eff Effects ()
 setPhase scope phase = do
   let json = TL.toStrict (decodeUtf8 (Aeson.encode phase))
   _ <- suspendEffect @KVSet (KV.SetRequest {KV.setRequestKey = TL.fromStrict (scopedPhaseKey @phase @event scope), KV.setRequestValue = TL.fromStrict json})
@@ -119,7 +119,7 @@ applyEvent scope defaultPhase event = do
       pure Nothing
 
 -- | Check whether the agent can exit based on its current phase.
-checkExit :: forall phase event. StateMachine phase event => Text -> phase -> Eff Effects StopCheckResult
+checkExit :: forall phase event. (StateMachine phase event) => Text -> phase -> Eff Effects StopCheckResult
 checkExit scope defaultPhase = do
   mPhase <- getPhase @phase @event scope
   let current = maybe defaultPhase id mPhase

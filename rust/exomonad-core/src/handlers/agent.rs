@@ -18,8 +18,8 @@ use crate::services::agent_control::{
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::services::supervisor_registry::{SupervisorInfo, SupervisorRegistry};
 use crate::{GithubOwner, GithubRepo, IssueNumber};
-use claude_teams_bridge::TeamRegistry;
 use async_trait::async_trait;
+use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::agent::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -78,8 +78,13 @@ impl AgentHandler {
     /// Auto-register a spawned child in the SupervisorRegistry.
     /// Resolves the caller's team from TeamRegistry, then maps the child key
     /// to the caller as supervisor.
-    async fn register_child_supervisor(&self, child_key: &str, ctx: &crate::effects::EffectContext) {
-        let (Some(sup_reg), Some(team_reg)) = (&self.supervisor_registry, &self.team_registry) else {
+    async fn register_child_supervisor(
+        &self,
+        child_key: &str,
+        ctx: &crate::effects::EffectContext,
+    ) {
+        let (Some(sup_reg), Some(team_reg)) = (&self.supervisor_registry, &self.team_registry)
+        else {
             return;
         };
         let agent_key = ctx.agent_name.to_string();
@@ -96,13 +101,15 @@ impl AgentHandler {
             return;
         };
 
-        sup_reg.register(
-            &[child_key.to_string()],
-            SupervisorInfo {
-                supervisor: ctx.agent_name.clone(),
-                team: team_name,
-            },
-        ).await;
+        sup_reg
+            .register(
+                &[child_key.to_string()],
+                SupervisorInfo {
+                    supervisor: ctx.agent_name.clone(),
+                    team: team_name,
+                },
+            )
+            .await;
     }
 }
 
@@ -456,7 +463,11 @@ impl AgentEffects for AgentHandler {
         // Generate MCP settings for the agent using stdio transport
         let agent_name = &req.name;
         let context_path = self.service.resolve_role_context("worker");
-        let settings_json = AgentControlService::generate_gemini_worker_settings(agent_name, context_path.as_deref(), &self.service.extra_mcp_servers);
+        let settings_json = AgentControlService::generate_gemini_worker_settings(
+            agent_name,
+            context_path.as_deref(),
+            &self.service.extra_mcp_servers,
+        );
 
         // Write settings to agent config dir
         let agent_dir = working_dir.join(format!(".exo/agents/{}", agent_name));

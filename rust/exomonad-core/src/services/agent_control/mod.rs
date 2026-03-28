@@ -751,13 +751,18 @@ impl AgentControlService {
 ///
 /// Checks `.exo/roles/{wasm_name}/context/{role}.md` in the project directory first,
 /// then falls back to `~/.exo/roles/{wasm_name}/context/{role}.md`.
-pub fn resolve_role_context_path(project_dir: &Path, wasm_name: &str, role: &str) -> Option<PathBuf> {
+pub fn resolve_role_context_path(
+    project_dir: &Path,
+    wasm_name: &str,
+    role: &str,
+) -> Option<PathBuf> {
     let local = project_dir.join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
     if local.exists() {
         return Some(local);
     }
     if let Ok(home) = std::env::var("HOME") {
-        let global = PathBuf::from(home).join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
+        let global =
+            PathBuf::from(home).join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
         if global.exists() {
             return Some(global);
         }

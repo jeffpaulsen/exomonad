@@ -1,6 +1,7 @@
 use claude_teams_bridge::{
     config_path, inbox_path, is_message_read, list_inboxes, list_teams, read_inbox,
-    write_team_config, write_to_inbox, TeamConfig, TeamInfo, TeamMember, TeamRegistry, TeamsMessage,
+    write_team_config, write_to_inbox, TeamConfig, TeamInfo, TeamMember, TeamRegistry,
+    TeamsMessage,
 };
 use serial_test::serial;
 use std::env;
@@ -340,13 +341,8 @@ async fn resolve_tier2_e2e_inbox_delivery() {
     assert_eq!(exo_result.unwrap().team_name, team);
 
     // Step 4: Tier 2 — supervisor NOT in memory, resolved from config.json
-    let sender_team = registry
-        .get("exo-worker")
-        .await
-        .map(|info| info.team_name);
-    let supervisor_result = registry
-        .resolve("supervisor", sender_team.as_deref())
-        .await;
+    let sender_team = registry.get("exo-worker").await.map(|info| info.team_name);
+    let supervisor_result = registry.resolve("supervisor", sender_team.as_deref()).await;
     assert!(supervisor_result.is_some());
     let supervisor_info = supervisor_result.unwrap();
     assert_eq!(supervisor_info.team_name, team);
@@ -416,17 +412,16 @@ fn resolve_from_config_real_cc_format() {
   ]
 }"#;
 
-    let config_dir = tmp
-        .path()
-        .join(".claude")
-        .join("teams")
-        .join(team);
+    let config_dir = tmp.path().join(".claude").join("teams").join(team);
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(config_dir.join("config.json"), cc_json).unwrap();
 
     // resolve_from_config should parse CC's camelCase JSON correctly
     let result = TeamRegistry::resolve_from_config(team, "supervisor");
-    assert!(result.is_some(), "Failed to resolve 'supervisor' from CC-format config.json");
+    assert!(
+        result.is_some(),
+        "Failed to resolve 'supervisor' from CC-format config.json"
+    );
     let info = result.unwrap();
     assert_eq!(info.team_name, team);
     assert_eq!(info.inbox_name, "supervisor");
@@ -456,10 +451,7 @@ async fn live_team_resolve_and_deliver() {
     // Verify the team exists on disk with the expected member
     let config_path = claude_teams_bridge::config_path(team);
     assert!(
-        config_path
-            .as_ref()
-            .map(|p| p.exists())
-            .unwrap_or(false),
+        config_path.as_ref().map(|p| p.exists()).unwrap_or(false),
         "Team '{}' not found — run TeamCreate first",
         team
     );
@@ -517,7 +509,10 @@ async fn live_team_resolve_and_deliver() {
     assert_eq!(last.from, "test-harness");
     assert!(last.text.contains("TWO_TIER_RESOLVE_TEST"));
     assert_eq!(last.timestamp, ts);
-    println!("[live] Verified message in inbox: from={}, text={}", last.from, last.text);
+    println!(
+        "[live] Verified message in inbox: from={}, text={}",
+        last.from, last.text
+    );
     println!(
         "[live] Message is live at ~/.claude/teams/{}/inboxes/{}.json",
         team, recipient

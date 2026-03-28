@@ -45,7 +45,7 @@ import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), Runtime (..), StopDecision (..), StopHookOutput (..), allowResponse)
 import ExoMonad.PDK (input, output)
-import ExoMonad.Types (HookConfig (..), Effects)
+import ExoMonad.Types (Effects, HookConfig (..))
 import Foreign.C.Types (CInt (..))
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
@@ -96,8 +96,9 @@ mcpHandlerRecord handlers = do
         Suspend k req -> output (BSL.toStrict $ Aeson.encode (Suspend @MCPCallOutput k req))
       pure 0
     Right mcpCall -> do
-      result <- logInfo_ ("Dispatching tool: " <> toolName mcpCall) `andThenLog` do
-        dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
+      result <-
+        logInfo_ ("Dispatching tool: " <> toolName mcpCall) `andThenLog` do
+          dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
 
       finalResult <- case result of
         Done resp -> do
@@ -192,16 +193,17 @@ hookHandler config = do
             PreToolUse -> "PreToolUse"
             PostToolUse -> "PostToolUse"
             WorkerExit -> "WorkerExit"
-      
-      result <- logInfo_ ("Hook received: " <> hookName) `andThenLogValue` do
-        case hookType of
-          SessionStart -> handleSessionStart hookInput (onSessionStart config)
-          SessionEnd -> handleStopHook hookInput (onStop config)
-          Stop -> handleStopHook hookInput (onStop config)
-          SubagentStop -> handleStopHook hookInput (onSubagentStop config)
-          PreToolUse -> handlePreToolUse hookInput (preToolUse config)
-          PostToolUse -> handlePreToolUse hookInput (postToolUse config)
-          WorkerExit -> handleWorkerExit hookInput
+
+      result <-
+        logInfo_ ("Hook received: " <> hookName) `andThenLogValue` do
+          case hookType of
+            SessionStart -> handleSessionStart hookInput (onSessionStart config)
+            SessionEnd -> handleStopHook hookInput (onStop config)
+            Stop -> handleStopHook hookInput (onStop config)
+            SubagentStop -> handleStopHook hookInput (onSubagentStop config)
+            PreToolUse -> handlePreToolUse hookInput (preToolUse config)
+            PostToolUse -> handlePreToolUse hookInput (postToolUse config)
+            WorkerExit -> handleWorkerExit hookInput
 
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
@@ -270,18 +272,20 @@ handleWorkerExit hookInput = do
           let (status, statusMsg) = case actualStatus of
                 "success" -> ("success", agentId <> " is idle")
                 other -> ("failure", "Worker " <> agentId <> " exited with status: " <> other)
-          res <- suspendEffect @Events.EventsNotifyParent
-                  (ProtoEvents.NotifyParentRequest
-                    { ProtoEvents.notifyParentRequestAgentId = TL.fromStrict agentId,
-                      ProtoEvents.notifyParentRequestStatus = TL.fromStrict status,
-                      ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg,
-                      ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
-                    })
+          res <-
+            suspendEffect @Events.EventsNotifyParent
+              ( ProtoEvents.NotifyParentRequest
+                  { ProtoEvents.notifyParentRequestAgentId = TL.fromStrict agentId,
+                    ProtoEvents.notifyParentRequestStatus = TL.fromStrict status,
+                    ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg,
+                    ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
+                  }
+              )
           case res of
-            Left err -> void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = TL.fromStrict ("Failed to notify parent: " <> T.pack (show err)), Log.errorRequestFields = "" })
-            Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest { Log.infoRequestMessage = TL.fromStrict ("Exit notified for " <> agentId <> " (" <> status <> ")"), Log.infoRequestFields = "" })
+            Left err -> void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("Failed to notify parent: " <> T.pack (show err)), Log.errorRequestFields = ""})
+            Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("Exit notified for " <> agentId <> " (" <> status <> ")"), Log.infoRequestFields = ""})
         Nothing -> do
-          void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = "agent_id missing from hook input", Log.errorRequestFields = "" })
+          void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = "agent_id missing from hook input", Log.errorRequestFields = ""})
       pure (allowResponse Nothing)
     pure (Aeson.toJSON res_)
 

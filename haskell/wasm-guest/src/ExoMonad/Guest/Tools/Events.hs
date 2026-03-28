@@ -137,29 +137,37 @@ notifyParentSchema =
 notifyParentCore :: NotifyParentArgs -> Eff Effects (Either Text ())
 notifyParentCore args = do
   -- Emit event via suspend
-  let eventPayload = BSL.toStrict $ Aeson.encode $ object
-        [ "status" .= npStatus args,
-          "message" .= npMessage args,
-          "pr_number" .= npPrNumber args,
-          "tasks_completed" .= npTasksCompleted args
-        ]
-  void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-    { Log.emitEventRequestEventType = "agent.completed",
-      Log.emitEventRequestPayload = eventPayload,
-      Log.emitEventRequestTimestamp = 0
-    })
+  let eventPayload =
+        BSL.toStrict $
+          Aeson.encode $
+            object
+              [ "status" .= npStatus args,
+                "message" .= npMessage args,
+                "pr_number" .= npPrNumber args,
+                "tasks_completed" .= npTasksCompleted args
+              ]
+  void $
+    suspendEffect_ @LogEmitEvent
+      ( Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "agent.completed",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          }
+      )
 
   let richMessage = composeNotifyMessage args
   let statusText = case npStatus args of
         Success -> "success" :: Text
         Failure -> "failure"
-  result <- suspendEffect @ProtoEvents.EventsNotifyParent
-              (ProtoEvents.NotifyParentRequest
-                { ProtoEvents.notifyParentRequestAgentId = "",
-                  ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-                  ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage,
-                  ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
-                })
+  result <-
+    suspendEffect @ProtoEvents.EventsNotifyParent
+      ( ProtoEvents.NotifyParentRequest
+          { ProtoEvents.notifyParentRequestAgentId = "",
+            ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+            ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage,
+            ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
+          }
+      )
   case result of
     Left err -> pure $ Left (T.pack (show err))
     Right _ -> pure $ Right ()
@@ -212,21 +220,27 @@ instance MCPTool SendMessage where
         ("summary", "An optional summary of the message")
       ]
   toolHandlerEff args = do
-    let address = ProtoEvents.Address
-          { ProtoEvents.addressKind = Just (ProtoEvents.AddressKindAgent (TL.fromStrict (smRecipient args)))
-          }
-    result <- suspendEffect @ProtoEvents.EventsSendMessage
-                (ProtoEvents.SendMessageRequest
-                  { ProtoEvents.sendMessageRequestRecipient = Just address,
-                    ProtoEvents.sendMessageRequestContent = TL.fromStrict (smContent args),
-                    ProtoEvents.sendMessageRequestSummary = maybe "" TL.fromStrict (smSummary args)
-                  })
+    let address =
+          ProtoEvents.Address
+            { ProtoEvents.addressKind = Just (ProtoEvents.AddressKindAgent (TL.fromStrict (smRecipient args)))
+            }
+    result <-
+      suspendEffect @ProtoEvents.EventsSendMessage
+        ( ProtoEvents.SendMessageRequest
+            { ProtoEvents.sendMessageRequestRecipient = Just address,
+              ProtoEvents.sendMessageRequestContent = TL.fromStrict (smContent args),
+              ProtoEvents.sendMessageRequestSummary = maybe "" TL.fromStrict (smSummary args)
+            }
+        )
     case result of
       Left err -> pure $ errorResult (T.pack (show err))
-      Right resp -> pure $ successResult $ object
-        [ "success" .= ProtoEvents.sendMessageResponseSuccess resp,
-          "delivery_method" .= ProtoEvents.sendMessageResponseDeliveryMethod resp
-        ]
+      Right resp ->
+        pure $
+          successResult $
+            object
+              [ "success" .= ProtoEvents.sendMessageResponseSuccess resp,
+                "delivery_method" .= ProtoEvents.sendMessageResponseDeliveryMethod resp
+              ]
 
 -- | Shutdown tool for cooperative agent exit
 data Shutdown = Shutdown
@@ -258,14 +272,19 @@ shutdownCore :: ShutdownArgs -> Eff Effects MCPCallOutput
 shutdownCore args = do
   let msg = maybe "Shutting down." id (sdMessage args)
   let statusText = "success" :: Text
-  void $ suspendEffect @ProtoEvents.EventsNotifyParent
-    (ProtoEvents.NotifyParentRequest
-      { ProtoEvents.notifyParentRequestAgentId = "",
-        ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-        ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg,
-        ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
-      })
-  void $ suspendEffect @ProtoAgent.AgentCloseSelf
-    (AgentProto.CloseSelfRequest
-      { AgentProto.closeSelfRequestReason = TL.fromStrict msg })
+  void $
+    suspendEffect @ProtoEvents.EventsNotifyParent
+      ( ProtoEvents.NotifyParentRequest
+          { ProtoEvents.notifyParentRequestAgentId = "",
+            ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+            ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg,
+            ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
+          }
+      )
+  void $
+    suspendEffect @ProtoAgent.AgentCloseSelf
+      ( AgentProto.CloseSelfRequest
+          { AgentProto.closeSelfRequestReason = TL.fromStrict msg
+          }
+      )
   pure $ successResult $ object ["shutdown" .= True]

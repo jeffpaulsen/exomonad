@@ -184,7 +184,9 @@ impl EventEffects for EventHandler {
                     let tab = crate::services::delivery::resolve_tab_name_for_agent(name.as_str());
                     (id, tab)
                 }
-                Address::Team { member: Some(m), .. } => {
+                Address::Team {
+                    member: Some(m), ..
+                } => {
                     let id = m.as_str().to_string();
                     let tab = crate::services::delivery::resolve_tab_name_for_agent(m.as_str());
                     (id, tab)
@@ -230,7 +232,8 @@ impl EventEffects for EventHandler {
                     "notify_parent: resolved supervisor from registry"
                 );
                 let parent_session_id = info.supervisor.as_str();
-                let tab_name = crate::services::delivery::resolve_tab_name_for_agent(parent_session_id);
+                let tab_name =
+                    crate::services::delivery::resolve_tab_name_for_agent(parent_session_id);
 
                 crate::services::delivery::notify_parent_delivery(
                     self.team_registry.as_deref(),

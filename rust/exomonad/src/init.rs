@@ -201,11 +201,12 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             std::fs::create_dir_all(&rules_dir)?;
             let link = rules_dir.join("exomonad_role.md");
             let _ = std::fs::remove_file(&link); // idempotent
-            // Compute relative path from .claude/rules/ to the source
-            let relative = pathdiff::diff_paths(&src, &rules_dir)
-                .unwrap_or(src.clone());
+                                                 // Compute relative path from .claude/rules/ to the source
+            let relative = pathdiff::diff_paths(&src, &rules_dir).unwrap_or(src.clone());
             match std::os::unix::fs::symlink(&relative, &link) {
-                Ok(()) => info!(src = %src.display(), link = %link.display(), "Symlinked role context for root"),
+                Ok(()) => {
+                    info!(src = %src.display(), link = %link.display(), "Symlinked role context for root")
+                }
                 Err(e) => warn!(error = %e, "Failed to symlink role context (non-fatal)"),
             }
         }
@@ -448,7 +449,9 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     let base_command = if let Some(ref cmd) = config.root_command {
         cmd.clone()
     } else {
-        let model_flag = config.model.as_ref()
+        let model_flag = config
+            .model
+            .as_ref()
             .map(|m| format!(" --model {}", m))
             .unwrap_or_default();
         match (config.root_agent_type, config.initial_prompt.as_deref()) {
@@ -650,19 +653,23 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             // Must be a copy, not a symlink — symlinks escape the worktree boundary
             // and cause Claude Code to discover parent context files.
             {
-                let context_source = resolve_role_context_path(&cwd, &config.wasm_name, &companion.role);
+                let context_source =
+                    resolve_role_context_path(&cwd, &config.wasm_name, &companion.role);
                 if let Some(src) = context_source {
                     let rules_dir = worktree_path.join(".claude/rules");
                     let _ = std::fs::create_dir_all(&rules_dir);
                     let dest = rules_dir.join("exomonad_role.md");
                     let _ = std::fs::remove_file(&dest); // idempotent
                     match std::fs::copy(&src, &dest) {
-                        Ok(_) => info!(name = %companion.name, src = %src.display(), dest = %dest.display(), "Copied role context for companion"),
-                        Err(e) => warn!(name = %companion.name, error = %e, "Failed to copy role context (non-fatal)"),
+                        Ok(_) => {
+                            info!(name = %companion.name, src = %src.display(), dest = %dest.display(), "Copied role context for companion")
+                        }
+                        Err(e) => {
+                            warn!(name = %companion.name, error = %e, "Failed to copy role context (non-fatal)")
+                        }
                     }
                 }
             }
-
 
             // Symlink server socket into worktree's .exo/
             let worktree_exo = worktree_path.join(".exo");
@@ -710,11 +717,10 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
         // Build command per agent type.
         // Prefix with identity env vars so hook CLI resolves the correct agent.
-        let escaped_task = companion
-            .task
-            .as_deref()
-            .map(|t| t.replace('\'', "'\\''"));
-        let model_flag = companion.model.as_ref()
+        let escaped_task = companion.task.as_deref().map(|t| t.replace('\'', "'\\''"));
+        let model_flag = companion
+            .model
+            .as_ref()
             .map(|m| format!(" --model {}", m))
             .unwrap_or_default();
         let env_prefix = format!(
@@ -906,4 +912,3 @@ fn gemini_hooks() -> serde_json::Value {
         ]
     })
 }
-

@@ -11,7 +11,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module ExoMonad.Guest.Tool.Schema
-
   ( JsonSchema (..),
     genericToolSchema,
     genericToolSchemaWith,
@@ -38,7 +37,6 @@ class JsonSchema a where
 
 instance JsonSchema Text where
   toSchema = object ["type" .= ("string" :: Text)]
-
 
 instance JsonSchema String where
   toSchema = object ["type" .= ("string" :: Text)]
@@ -165,9 +163,6 @@ instance (Selector s, JsonSchema a, IsOptional a) => GJsonSchema (S1 s (K1 i a))
         required = if isOptional @a then [] else [name]
      in SchemaObject properties required
 
-
-
-
 -- | Merge two Aeson objects.
 mergeObjects :: Value -> Value -> Value
 mergeObjects (Aeson.Object a) (Aeson.Object b) = Aeson.Object (a <> b)
@@ -190,4 +185,3 @@ camelToSnake (c : cs) = toLower c : go cs
     go (x : xs)
       | isUpper x = '_' : toLower x : go xs
       | otherwise = x : go xs
-

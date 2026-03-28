@@ -58,20 +58,20 @@ where
 import Control.Monad (forM, void)
 import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, object, withObject, withText, (.:), (.:?), (.=))
-import Data.Maybe (fromMaybe)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.EffectError (Custom (..), EffectError (..), EffectErrorKind (..), InvalidInput (..), NetworkError (..), NotFound (..), PermissionDenied (..), Timeout (..))
 import Effects.Git qualified as Git
-import ExoMonad.Effects.Git (GitGetStatus, GitHasUnpushedCommits)
 import Effects.Log qualified as Log
+import ExoMonad.Effects.Git (GitGetStatus, GitHasUnpushedCommits)
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
-import ExoMonad.Guest.Tool.Class (MCPCallOutput(..), errorResult, successResult)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
@@ -141,8 +141,8 @@ instance FromJSON ForkWaveArgs where
 
 -- | Structured result from fork_wave core logic.
 data ForkWaveResult = ForkWaveResult
-  { fwrSpawned :: [(Text, AC.SpawnResult)]  -- [(actualSlug, spawnResult)]
-  , fwrErrors :: [Text]
+  { fwrSpawned :: [(Text, AC.SpawnResult)], -- [(actualSlug, spawnResult)]
+    fwrErrors :: [Text]
   }
 
 -- | Shared tool description for fork_wave.
@@ -165,38 +165,40 @@ forkWaveCore args = do
   case statusResult of
     Right resp
       | not (null (Git.getStatusResponseDirtyFiles resp))
-        || not (null (Git.getStatusResponseStagedFiles resp)) ->
-        pure $ Left "Working tree has uncommitted changes. Commit and push your changes first, then call fork_wave."
+          || not (null (Git.getStatusResponseStagedFiles resp)) ->
+          pure $ Left "Working tree has uncommitted changes. Commit and push your changes first, then call fork_wave."
     Left err ->
       pure $ Left ("Failed to check git status: " <> spawnErrorMessage err)
     _ -> do
       -- Check for unpushed commits
       unpushedResult <- suspendEffect @GitHasUnpushedCommits (Git.HasUnpushedCommitsRequest {Git.hasUnpushedCommitsRequestWorkingDir = ".", Git.hasUnpushedCommitsRequestRemote = "origin"})
       case unpushedResult of
-        Right resp | Git.hasUnpushedCommitsResponseHasUnpushed resp ->
-          pure $ Left "Local commits not pushed to remote. Run 'git push' first, then call fork_wave."
+        Right resp
+          | Git.hasUnpushedCommitsResponseHasUnpushed resp ->
+              pure $ Left "Local commits not pushed to remote. Run 'git push' first, then call fork_wave."
         Left err ->
           pure $ Left ("Failed to check unpushed commits: " <> spawnErrorMessage err)
         _ -> do
           -- Spawn each child
           results <- forM (fwaChildren args) $ \child -> do
-            let cfg = AC.SpawnSubtreeConfig
-                  { AC.stcTask = fwcTask child
-                  , AC.stcBranchName = fwcSlug child
-                  , AC.stcForkSession = fromMaybe True (fwcForkSession child)
-                  , AC.stcRole = Nothing
-                  , AC.stcAgentType = AC.Claude
-                  , AC.stcPerms = AC.defaultPermFlags
-                  , AC.stcWorkingDir = Nothing
-                  , AC.stcPermissions = Nothing
-                  , AC.stcStandaloneRepo = False
-                  , AC.stcAllowedDirs = []
-                  }
+            let cfg =
+                  AC.SpawnSubtreeConfig
+                    { AC.stcTask = fwcTask child,
+                      AC.stcBranchName = fwcSlug child,
+                      AC.stcForkSession = fromMaybe True (fwcForkSession child),
+                      AC.stcRole = Nothing,
+                      AC.stcAgentType = AC.Claude,
+                      AC.stcPerms = AC.defaultPermFlags,
+                      AC.stcWorkingDir = Nothing,
+                      AC.stcPermissions = Nothing,
+                      AC.stcStandaloneRepo = False,
+                      AC.stcAllowedDirs = []
+                    }
             result <- AC.spawnSubtree cfg
             case result of
               Left err | hasCustomCode "worktree.branch_exists" err -> do
                 let retrySlug = fwcSlug child <> "-2"
-                let cfg' = cfg { AC.stcBranchName = retrySlug }
+                let cfg' = cfg {AC.stcBranchName = retrySlug}
                 result' <- AC.spawnSubtree cfg'
                 case result' of
                   Left err' -> pure (Left (spawnErrorMessage err'))
@@ -209,10 +211,12 @@ forkWaveCore args = do
                 pure (Right (fwcSlug child, spawnResult))
 
           let (errs, successes) = partitionEithers results
-          pure $ Right $ ForkWaveResult
-            { fwrSpawned = successes
-            , fwrErrors = errs
-            }
+          pure $
+            Right $
+              ForkWaveResult
+                { fwrSpawned = successes,
+                  fwrErrors = errs
+                }
 
 -- | Render a ForkWaveResult to MCPCallOutput.
 forkWaveRender :: ForkWaveResult -> MCPCallOutput
@@ -274,25 +278,27 @@ spawnLeafSubtreeCore :: SpawnLeafSubtreeArgs -> Eff Effects (Either Text (Text, 
 spawnLeafSubtreeCore args = do
   let renderedTask = slsTask args <> "\n\n" <> leafProfileText
       standaloneRepo = fromMaybe False (slsStandaloneRepo args)
-      perms = AC.PermissionFlags
-        { AC.permMode = slsPermissionMode args,
-          AC.allowedTools = fromMaybe [] (slsAllowedTools args),
-          AC.disallowedTools = fromMaybe [] (slsDisallowedTools args)
-        }
-      cfg = AC.SpawnLeafSubtreeConfig
-        { AC.slcTask = renderedTask
-        , AC.slcBranchName = slsBranchName args
-        , AC.slcRole = Nothing
-        , AC.slcAgentType = AC.Gemini
-        , AC.slcPerms = perms
-        , AC.slcStandaloneRepo = standaloneRepo
-        , AC.slcAllowedDirs = fromMaybe [] (slsAllowedDirs args)
-        }
+      perms =
+        AC.PermissionFlags
+          { AC.permMode = slsPermissionMode args,
+            AC.allowedTools = fromMaybe [] (slsAllowedTools args),
+            AC.disallowedTools = fromMaybe [] (slsDisallowedTools args)
+          }
+      cfg =
+        AC.SpawnLeafSubtreeConfig
+          { AC.slcTask = renderedTask,
+            AC.slcBranchName = slsBranchName args,
+            AC.slcRole = Nothing,
+            AC.slcAgentType = AC.Gemini,
+            AC.slcPerms = perms,
+            AC.slcStandaloneRepo = standaloneRepo,
+            AC.slcAllowedDirs = fromMaybe [] (slsAllowedDirs args)
+          }
   result <- AC.spawnLeafSubtree cfg
   case result of
     Left err | hasCustomCode "worktree.branch_exists" err -> do
       let retrySlug = slsBranchName args <> "-2"
-      let cfg' = cfg { AC.slcBranchName = retrySlug }
+      let cfg' = cfg {AC.slcBranchName = retrySlug}
       result' <- AC.spawnLeafSubtree cfg'
       case result' of
         Left err' -> pure $ Left (spawnErrorMessage err')
@@ -352,22 +358,22 @@ instance JsonSchema WorkerSpec where
     Aeson.Object $
       genericToolSchemaWith @WorkerSpec
         [ ("name", "Human-readable name for the leaf agent"),
-        ("task", "Short description of the task"),
-        ("read_first", "Files the agent should read before starting"),
-        ("steps", "Numbered implementation steps"),
-        ("verify", "Commands to verify the work"),
-        ("done_criteria", "Acceptance criteria for completion"),
-        ("boundary", "Things the agent must NOT do"),
-        ("context", "Freeform context: code snippets, examples, detailed specs"),
-        ("prompt", "Raw prompt (escape hatch). If provided, all other fields except name are ignored."),
-        ("profiles", "Template profiles to include (e.g., 'general', 'haskell', 'rust')"),
-        ("context_files", "Paths to files to include in context"),
-        ("verify_templates", "Verification script templates"),
-        ("type", "Worker type: 'implementation' (default) or 'research'. Research workers are read-only — they explore, search, and report findings via notify_parent."),
-        ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
-        ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
-        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
-      ]
+          ("task", "Short description of the task"),
+          ("read_first", "Files the agent should read before starting"),
+          ("steps", "Numbered implementation steps"),
+          ("verify", "Commands to verify the work"),
+          ("done_criteria", "Acceptance criteria for completion"),
+          ("boundary", "Things the agent must NOT do"),
+          ("context", "Freeform context: code snippets, examples, detailed specs"),
+          ("prompt", "Raw prompt (escape hatch). If provided, all other fields except name are ignored."),
+          ("profiles", "Template profiles to include (e.g., 'general', 'haskell', 'rust')"),
+          ("context_files", "Paths to files to include in context"),
+          ("verify_templates", "Verification script templates"),
+          ("type", "Worker type: 'implementation' (default) or 'research'. Research workers are read-only — they explore, search, and report findings via notify_parent."),
+          ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
+          ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
+          ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
+        ]
 
 instance FromJSON WorkerSpec where
   parseJSON = withObject "WorkerSpec" $ \v ->
@@ -414,21 +420,23 @@ spawnWorkersCore :: SpawnWorkersArgs -> Eff Effects MCPCallOutput
 spawnWorkersCore args = do
   results <- forM (swsSpecs args) $ \spec -> do
     let protocol = case wsType spec of
-              Just Research -> researchProfileText
-              _             -> workerProfileText
+          Just Research -> researchProfileText
+          _ -> workerProfileText
         prompt = case wsPrompt spec of
           Just p -> p
           Nothing -> renderSpec spec <> "\n\n" <> protocol
-        perms = AC.PermissionFlags
-          { AC.permMode = wsPermissionMode spec,
-            AC.allowedTools = fromMaybe [] (wsAllowedTools spec),
-            AC.disallowedTools = fromMaybe [] (wsDisallowedTools spec)
-          }
-        cfg = AC.SpawnWorkerConfig
-          { AC.swcName = wsName spec,
-            AC.swcPrompt = prompt,
-            AC.swcPerms = perms
-          }
+        perms =
+          AC.PermissionFlags
+            { AC.permMode = wsPermissionMode spec,
+              AC.allowedTools = fromMaybe [] (wsAllowedTools spec),
+              AC.disallowedTools = fromMaybe [] (wsDisallowedTools spec)
+            }
+        cfg =
+          AC.SpawnWorkerConfig
+            { AC.swcName = wsName spec,
+              AC.swcPrompt = prompt,
+              AC.swcPerms = perms
+            }
     r <- AC.spawnWorker cfg
     case r of
       Right _ -> emitSpawnEvent (wsName spec) "gemini-worker" (wsTask spec)
@@ -449,20 +457,21 @@ spawnWorkersCore args = do
 data SpawnGemini
 
 data SpawnGeminiArgs = SpawnGeminiArgs
-  { sgName        :: Text
-  , sgTask        :: Text
-  , sgReadFirst   :: Maybe [Text]
-  , sgSteps       :: Maybe [Text]
-  , sgVerify      :: Maybe [Text]
-  , sgBoundary    :: Maybe [Text]
-  , sgContext     :: Maybe Text
-  } deriving (Show, Eq, Generic)
+  { sgName :: Text,
+    sgTask :: Text,
+    sgReadFirst :: Maybe [Text],
+    sgSteps :: Maybe [Text],
+    sgVerify :: Maybe [Text],
+    sgBoundary :: Maybe [Text],
+    sgContext :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON SpawnGeminiArgs where
   parseJSON = withObject "SpawnGeminiArgs" $ \v ->
     SpawnGeminiArgs
-      <$> v .:  "name"
-      <*> v .:  "task"
+      <$> v .: "name"
+      <*> v .: "task"
       <*> v .:? "read_first"
       <*> v .:? "steps"
       <*> v .:? "verify"
@@ -475,41 +484,51 @@ spawnGeminiDescription = "Spawn a Gemini agent in its own worktree and branch. T
 spawnGeminiSchema :: Aeson.Object
 spawnGeminiSchema =
   genericToolSchemaWith @SpawnGeminiArgs
-    [ ("name",       "Branch name suffix (e.g., 'fix-clippy' \x2192 'main.fix-clippy')")
-    , ("task",       "What to build. Combined with steps/verify/boundary into structured spec")
-    , ("steps",      "Numbered implementation steps with code snippets and exact file paths")
-    , ("verify",     "Exact verification commands (e.g., 'cargo test --workspace')")
-    , ("boundary",   "DO NOT rules for known failure modes")
-    , ("context",    "Freeform context: code snippets, examples, patterns to follow")
-    , ("read_first", "File paths to read before starting (CLAUDE.md, source patterns)")
+    [ ("name", "Branch name suffix (e.g., 'fix-clippy' \x2192 'main.fix-clippy')"),
+      ("task", "What to build. Combined with steps/verify/boundary into structured spec"),
+      ("steps", "Numbered implementation steps with code snippets and exact file paths"),
+      ("verify", "Exact verification commands (e.g., 'cargo test --workspace')"),
+      ("boundary", "DO NOT rules for known failure modes"),
+      ("context", "Freeform context: code snippets, examples, patterns to follow"),
+      ("read_first", "File paths to read before starting (CLAUDE.md, source patterns)")
     ]
 
 spawnGeminiCore :: SpawnGeminiArgs -> Eff Effects (Either Text (Text, AC.SpawnResult))
 spawnGeminiCore args = do
-  let leafArgs = SpawnLeafSubtreeArgs
-        { slsTask         = buildGeminiTask args
-        , slsBranchName   = sgName args
-        , slsPermissionMode  = Nothing
-        , slsAllowedTools    = Nothing
-        , slsDisallowedTools = Nothing
-        , slsStandaloneRepo  = Just False
-        , slsAllowedDirs     = Nothing
-        }
+  let leafArgs =
+        SpawnLeafSubtreeArgs
+          { slsTask = buildGeminiTask args,
+            slsBranchName = sgName args,
+            slsPermissionMode = Nothing,
+            slsAllowedTools = Nothing,
+            slsDisallowedTools = Nothing,
+            slsStandaloneRepo = Just False,
+            slsAllowedDirs = Nothing
+          }
   spawnLeafSubtreeCore leafArgs
 
 buildGeminiTask :: SpawnGeminiArgs -> Text
 buildGeminiTask args =
-  let spec = WorkerSpec
-        { wsName = sgName args, wsTask = sgTask args
-        , wsReadFirst = sgReadFirst args, wsSteps = sgSteps args
-        , wsVerify = sgVerify args, wsDoneCriteria = Nothing
-        , wsBoundary = sgBoundary args, wsContext = sgContext args
-        , wsPrompt = Nothing, wsProfiles = Nothing
-        , wsContextFiles = Nothing, wsVerifyTemplates = Nothing
-        , wsType = Nothing
-        , wsPermissionMode = Nothing, wsAllowedTools = Nothing, wsDisallowedTools = Nothing
-        }
-  in renderSpec spec
+  let spec =
+        WorkerSpec
+          { wsName = sgName args,
+            wsTask = sgTask args,
+            wsReadFirst = sgReadFirst args,
+            wsSteps = sgSteps args,
+            wsVerify = sgVerify args,
+            wsDoneCriteria = Nothing,
+            wsBoundary = sgBoundary args,
+            wsContext = sgContext args,
+            wsPrompt = Nothing,
+            wsProfiles = Nothing,
+            wsContextFiles = Nothing,
+            wsVerifyTemplates = Nothing,
+            wsType = Nothing,
+            wsPermissionMode = Nothing,
+            wsAllowedTools = Nothing,
+            wsDisallowedTools = Nothing
+          }
+   in renderSpec spec
 
 -- ============================================================================
 -- SpawnWorkerTool (inline — ephemeral pane, no branch)
@@ -518,9 +537,10 @@ buildGeminiTask args =
 data SpawnWorkerTool
 
 data SpawnWorkerToolArgs = SpawnWorkerToolArgs
-  { swtName :: Text
-  , swtTask :: Text
-  } deriving (Show, Eq, Generic)
+  { swtName :: Text,
+    swtTask :: Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON SpawnWorkerToolArgs where
   parseJSON = withObject "SpawnWorkerToolArgs" $ \v ->
@@ -534,30 +554,31 @@ spawnWorkerToolDescription = "Spawn an ephemeral Gemini worker in a tmux pane. T
 spawnWorkerToolSchema :: Aeson.Object
 spawnWorkerToolSchema =
   genericToolSchemaWith @SpawnWorkerToolArgs
-    [ ("name", "Worker name (pane title, messaging identity)")
-    , ("task", "The full prompt. Everything the worker needs in one string")
+    [ ("name", "Worker name (pane title, messaging identity)"),
+      ("task", "The full prompt. Everything the worker needs in one string")
     ]
 
 spawnWorkerToolCore :: SpawnWorkerToolArgs -> Eff Effects MCPCallOutput
 spawnWorkerToolCore args = do
-  let spec = WorkerSpec
-        { wsName = swtName args
-        , wsTask = swtTask args
-        , wsReadFirst = Nothing
-        , wsSteps = Nothing
-        , wsVerify = Nothing
-        , wsDoneCriteria = Nothing
-        , wsBoundary = Nothing
-        , wsContext = Nothing
-        , wsPrompt = Nothing
-        , wsProfiles = Nothing
-        , wsContextFiles = Nothing
-        , wsVerifyTemplates = Nothing
-        , wsType = Nothing
-        , wsPermissionMode = Nothing
-        , wsAllowedTools = Nothing
-        , wsDisallowedTools = Nothing
-        }
+  let spec =
+        WorkerSpec
+          { wsName = swtName args,
+            wsTask = swtTask args,
+            wsReadFirst = Nothing,
+            wsSteps = Nothing,
+            wsVerify = Nothing,
+            wsDoneCriteria = Nothing,
+            wsBoundary = Nothing,
+            wsContext = Nothing,
+            wsPrompt = Nothing,
+            wsProfiles = Nothing,
+            wsContextFiles = Nothing,
+            wsVerifyTemplates = Nothing,
+            wsType = Nothing,
+            wsPermissionMode = Nothing,
+            wsAllowedTools = Nothing,
+            wsDisallowedTools = Nothing
+          }
   spawnWorkersCore (SpawnWorkersArgs [spec])
 
 -- ============================================================================
@@ -588,16 +609,18 @@ instance FromJSON SpawnAcpArgs where
 spawnAcpCore :: SpawnAcpArgs -> Eff Effects MCPCallOutput
 spawnAcpCore args = do
   let renderedPrompt = saPrompt args <> "\n\n" <> workerProfileText
-      perms = AC.PermissionFlags
-        { AC.permMode = saPermissionMode args,
-          AC.allowedTools = fromMaybe [] (saAllowedTools args),
-          AC.disallowedTools = fromMaybe [] (saDisallowedTools args)
-        }
-      cfg = AC.SpawnAcpConfig
-        { AC.sacName = saName args,
-          AC.sacPrompt = renderedPrompt,
-          AC.sacPerms = perms
-        }
+      perms =
+        AC.PermissionFlags
+          { AC.permMode = saPermissionMode args,
+            AC.allowedTools = fromMaybe [] (saAllowedTools args),
+            AC.disallowedTools = fromMaybe [] (saDisallowedTools args)
+          }
+      cfg =
+        AC.SpawnAcpConfig
+          { AC.sacName = saName args,
+            AC.sacPrompt = renderedPrompt,
+            AC.sacPerms = perms
+          }
   result <- AC.spawnAcp cfg
   case result of
     Left err -> pure $ errorResult (spawnErrorMessage err)
@@ -608,16 +631,22 @@ spawnAcpCore args = do
 -- | Helper to emit 'agent.spawned' event to the host.
 emitSpawnEvent :: Text -> Text -> Text -> Eff Effects ()
 emitSpawnEvent slug agentType taskSummary = do
-  let eventPayload = BSL.toStrict $ Aeson.encode $ object
-        [ "slug" .= slug,
-          "agent_type" .= agentType,
-          "task_summary" .= taskSummary
-        ]
-  void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-    { Log.emitEventRequestEventType = "agent.spawned",
-      Log.emitEventRequestPayload = eventPayload,
-      Log.emitEventRequestTimestamp = 0
-    })
+  let eventPayload =
+        BSL.toStrict $
+          Aeson.encode $
+            object
+              [ "slug" .= slug,
+                "agent_type" .= agentType,
+                "task_summary" .= taskSummary
+              ]
+  void $
+    suspendEffect_ @LogEmitEvent
+      ( Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "agent.spawned",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          }
+      )
 
 -- ============================================================================
 -- Raw Text prompt builders (WASM32 workaround)
@@ -627,14 +656,15 @@ emitSpawnEvent slug agentType taskSummary = do
 -- Callers append the appropriate protocol for the agent's identity.
 renderSpec :: WorkerSpec -> Text
 renderSpec spec =
-  T.intercalate "\n\n" $ filter (not . T.null) $
-    [ "## TASK\n" <> wsTask spec ]
-    <> maybe [] (\items -> ["## BOUNDARY\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsBoundary spec)
-    <> maybe [] (\items -> ["## READ FIRST\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsReadFirst spec)
-    <> maybe [] (\items -> ["## STEPS\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1..] items)]) (wsSteps spec)
-    <> maybe [] (\t -> if T.null t then [] else ["## CONTEXT\n" <> t]) (wsContext spec)
-    <> maybe [] (\items -> ["## VERIFY\n" <> T.intercalate "\n" (map (\c -> "- `" <> c <> "`") items)]) (wsVerify spec)
-    <> maybe [] (\items -> ["## DONE CRITERIA\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsDoneCriteria spec)
+  T.intercalate "\n\n" $
+    filter (not . T.null) $
+      ["## TASK\n" <> wsTask spec]
+        <> maybe [] (\items -> ["## BOUNDARY\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsBoundary spec)
+        <> maybe [] (\items -> ["## READ FIRST\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsReadFirst spec)
+        <> maybe [] (\items -> ["## STEPS\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1 ..] items)]) (wsSteps spec)
+        <> maybe [] (\t -> if T.null t then [] else ["## CONTEXT\n" <> t]) (wsContext spec)
+        <> maybe [] (\items -> ["## VERIFY\n" <> T.intercalate "\n" (map (\c -> "- `" <> c <> "`") items)]) (wsVerify spec)
+        <> maybe [] (\items -> ["## DONE CRITERIA\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsDoneCriteria spec)
 
 -- | Pre-rendered leaf profile text.
 leafProfileText :: Text

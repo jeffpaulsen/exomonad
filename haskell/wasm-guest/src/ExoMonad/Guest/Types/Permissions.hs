@@ -3,25 +3,30 @@
 {-# LANGUAGE TypeApplications #-}
 
 module ExoMonad.Guest.Types.Permissions
-  ( ToolPattern(..)
-  , ClaudePermissions(..)
-  , renderToolPattern
-  , defaultSandboxPermissions
-  ) where
+  ( ToolPattern (..),
+    ClaudePermissions (..),
+    renderToolPattern,
+    defaultSandboxPermissions,
+  )
+where
 
-import Data.Text (Text)
+import Data.Aeson (FromJSON (..), withObject, (.:?))
 import Data.Maybe (fromMaybe)
-import Data.Aeson (FromJSON(..), withObject, (.:?))
-import ExoMonad.Guest.Tool.Schema (JsonSchema(..))
+import Data.Text (Text)
+import ExoMonad.Guest.Tool.Schema (JsonSchema (..))
 import GHC.Generics (Generic)
 
 -- | Typed tool patterns for Claude Code permission rules.
 -- Renders to strings like "Read(../**)", "Edit(./src/**)"
 data ToolPattern
-  = ReadPat Text      -- ^ Read(pattern)
-  | EditPat Text      -- ^ Edit(pattern)
-  | BashPat Text      -- ^ Bash(pattern)
-  | CustomPat Text    -- ^ Arbitrary tool pattern string
+  = -- | Read(pattern)
+    ReadPat Text
+  | -- | Edit(pattern)
+    EditPat Text
+  | -- | Bash(pattern)
+    BashPat Text
+  | -- | Arbitrary tool pattern string
+    CustomPat Text
   deriving (Show, Eq, Generic)
 
 instance JsonSchema ToolPattern where
@@ -30,31 +35,34 @@ instance JsonSchema ToolPattern where
 -- | Claude Code permission rules. Only available for Claude agents (spawn_subtree),
 -- not Gemini agents (spawn_leaf_subtree, spawn_workers).
 data ClaudePermissions = ClaudePermissions
-  { cpAllow :: [ToolPattern]
-  , cpDeny  :: [ToolPattern]
-  } deriving (Show, Eq, Generic)
+  { cpAllow :: [ToolPattern],
+    cpDeny :: [ToolPattern]
+  }
+  deriving (Show, Eq, Generic)
 
 instance JsonSchema ClaudePermissions
 
 instance FromJSON ClaudePermissions where
   parseJSON = withObject "ClaudePermissions" $ \v -> do
     allow <- v .:? "allow"
-    deny  <- v .:? "deny"
-    pure $ ClaudePermissions
-      { cpAllow = map CustomPat (fromMaybe [] allow)
-      , cpDeny  = map CustomPat (fromMaybe [] deny)
-      }
+    deny <- v .:? "deny"
+    pure $
+      ClaudePermissions
+        { cpAllow = map CustomPat (fromMaybe [] allow),
+          cpDeny = map CustomPat (fromMaybe [] deny)
+        }
 
 -- | Render a ToolPattern to the string format Claude Code expects.
 renderToolPattern :: ToolPattern -> Text
-renderToolPattern (ReadPat p)   = "Read(" <> p <> ")"
-renderToolPattern (EditPat p)   = "Edit(" <> p <> ")"
-renderToolPattern (BashPat p)   = "Bash(" <> p <> ")"
+renderToolPattern (ReadPat p) = "Read(" <> p <> ")"
+renderToolPattern (EditPat p) = "Edit(" <> p <> ")"
+renderToolPattern (BashPat p) = "Bash(" <> p <> ")"
 renderToolPattern (CustomPat p) = p
 
 -- | Default permissions for sandboxed agents: deny all access outside working dir.
 defaultSandboxPermissions :: ClaudePermissions
-defaultSandboxPermissions = ClaudePermissions
-  { cpAllow = []
-  , cpDeny  = [ReadPat "../**", EditPat "../**"]
-  }
+defaultSandboxPermissions =
+  ClaudePermissions
+    { cpAllow = [],
+      cpDeny = [ReadPat "../**", EditPat "../**"]
+    }

@@ -62,7 +62,8 @@ impl FileLock {
 
                     // Backoff with jitter: base 10ms * 2^attempt, capped at 200ms, plus jitter
                     let base_ms = 10u64.saturating_mul(1u64 << attempt.min(4));
-                    let jitter_ms = (std::process::id() as u64 + attempt as u64 * 7) % (base_ms / 2 + 1);
+                    let jitter_ms =
+                        (std::process::id() as u64 + attempt as u64 * 7) % (base_ms / 2 + 1);
                     let sleep_ms = base_ms + jitter_ms;
                     std::thread::sleep(Duration::from_millis(sleep_ms.min(200)));
                     attempt += 1;
@@ -117,8 +118,7 @@ fn try_create_lock(lock_path: &Path, ttl: Duration) -> io::Result<()> {
         created_at: chrono::Utc::now().to_rfc3339(),
         ttl_seconds: ttl.as_secs(),
     };
-    serde_json::to_writer(&file, &metadata)
-        .map_err(io::Error::other)?;
+    serde_json::to_writer(&file, &metadata).map_err(io::Error::other)?;
     file.sync_all()?;
     Ok(())
 }

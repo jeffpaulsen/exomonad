@@ -21,28 +21,28 @@ where
 
 import Control.Monad (void, when)
 import Control.Monad.Freer (Eff)
-import Data.Maybe (fromMaybe)
-import Data.Map qualified as Map
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
+import Effects.Agent qualified as Agent
 import Effects.Git qualified as Git
 import Effects.Github qualified as GH
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
 import Effects.Process qualified as Proc
-import Effects.Agent qualified as Agent
 import ExoMonad.Effects.Agent (AgentCleanup)
-import ExoMonad.Effects.Git (GitGetRepoInfo, GitGetBranch)
+import ExoMonad.Effects.Git (GitGetBranch, GitGetRepoInfo)
 import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
-import ExoMonad.Effects.Process (ProcessRun)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), Effects, errorResult, successResult)
+import ExoMonad.Effects.Process (ProcessRun)
+import ExoMonad.Guest.Tool.Class (Effects, MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
@@ -118,12 +118,14 @@ mergePRCore args = do
           currentBranch = TL.toStrict (Git.getBranchResponseBranch branchResp)
 
       -- Self-merge guard: agents cannot merge their own PRs
-      prResult <- suspendEffect @GitHubGetPullRequest GH.GetPullRequestRequest
-        { GH.getPullRequestRequestOwner = TL.fromStrict owner
-        , GH.getPullRequestRequestRepo = TL.fromStrict repo
-        , GH.getPullRequestRequestNumber = fromIntegral prNum
-        , GH.getPullRequestRequestIncludeReviews = not force
-        }
+      prResult <-
+        suspendEffect @GitHubGetPullRequest
+          GH.GetPullRequestRequest
+            { GH.getPullRequestRequestOwner = TL.fromStrict owner,
+              GH.getPullRequestRequestRepo = TL.fromStrict repo,
+              GH.getPullRequestRequestNumber = fromIntegral prNum,
+              GH.getPullRequestRequestIncludeReviews = not force
+            }
       case prResult of
         Left err -> do
           void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: failed to fetch PR: " <> T.pack (show err)), Log.errorRequestFields = ""})
@@ -135,15 +137,16 @@ mergePRCore args = do
                 Nothing -> False
           if isSelfMerge
             then pure $ Left $ "Cannot merge your own PR #" <> T.pack (show prNum) <> ". Your parent agent will merge this PR after reviewing. Call notify_parent instead."
-            else if force
-              then doMerge args
-              else do
-                let readiness = checkCopilotReadinessFromPR prNum resp
-                case readiness of
-                  Ready -> doMerge args
-                  NotReady reason -> do
-                    void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: blocked: " <> reason), Log.errorRequestFields = ""})
-                    pure $ Left reason
+            else
+              if force
+                then doMerge args
+                else do
+                  let readiness = checkCopilotReadinessFromPR prNum resp
+                  case readiness of
+                    Ready -> doMerge args
+                    NotReady reason -> do
+                      void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: blocked: " <> reason), Log.errorRequestFields = ""})
+                      pure $ Left reason
     _ -> do
       void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = "MergePR: failed to get repo info or branch for self-merge check", Log.errorRequestFields = ""})
       pure $ Left ("Failed to determine repo/branch info. Cannot verify self-merge guard for PR #" <> T.pack (show prNum) <> ".")
@@ -156,9 +159,11 @@ mergePRRender output =
       [ "success" .= mpoSuccess output,
         "message" .= mpoMessage output,
         "git_fetched" .= mpoGitFetched output,
-        "next" .= (if mpoPullOk output
-          then "Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text
-          else "git pull failed — run 'git pull --rebase' manually to sync your local branch. Then verify build: cargo check --workspace." :: Text)
+        "next"
+          .= ( if mpoPullOk output
+                 then "Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text
+                 else "git pull failed — run 'git pull --rebase' manually to sync your local branch. Then verify build: cargo check --workspace." :: Text
+             )
       ]
 
 -- | Copilot review readiness.
@@ -173,29 +178,35 @@ checkCopilotReadinessFromPR prNum resp =
         Just p -> TL.toStrict (GH.pullRequestHeadSha p)
         Nothing -> ""
       copilotReviews = filter isCopilotReview reviews
-  in case reverse copilotReviews of
-    [] -> NotReady $ "No Copilot review yet on PR #" <> T.pack (show prNum)
-          <> ". Wait for [PR READY] or [REVIEW TIMEOUT] from the event system."
-    (latest:_) ->
-      let reviewSha = TL.toStrict (GH.reviewCommitId latest)
-          state = GH.reviewState latest
-      in case state of
-        Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_APPROVED) ->
-          Ready
-
-        Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_CHANGES_REQUESTED) ->
-          if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
-            then Ready
-            else NotReady $ "Copilot requested changes on PR #" <> T.pack (show prNum)
-                  <> ". Wait for the agent to push fixes ([FIXES PUSHED]) or use force=true."
-
-        Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_COMMENTED) ->
-          if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
-            then Ready
-            else NotReady $ "Copilot commented on PR #" <> T.pack (show prNum)
-                  <> ". Wait for the agent to address comments ([FIXES PUSHED]) or use force=true."
-
-        _ -> Ready
+   in case reverse copilotReviews of
+        [] ->
+          NotReady $
+            "No Copilot review yet on PR #"
+              <> T.pack (show prNum)
+              <> ". Wait for [PR READY] or [REVIEW TIMEOUT] from the event system."
+        (latest : _) ->
+          let reviewSha = TL.toStrict (GH.reviewCommitId latest)
+              state = GH.reviewState latest
+           in case state of
+                Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_APPROVED) ->
+                  Ready
+                Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_CHANGES_REQUESTED) ->
+                  if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
+                    then Ready
+                    else
+                      NotReady $
+                        "Copilot requested changes on PR #"
+                          <> T.pack (show prNum)
+                          <> ". Wait for the agent to push fixes ([FIXES PUSHED]) or use force=true."
+                Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_COMMENTED) ->
+                  if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
+                    then Ready
+                    else
+                      NotReady $
+                        "Copilot commented on PR #"
+                          <> T.pack (show prNum)
+                          <> ". Wait for the agent to address comments ([FIXES PUSHED]) or use force=true."
+                _ -> Ready
 
 -- | Check if a review is from Copilot (author login contains "copilot").
 isCopilotReview :: GH.Review -> Bool
@@ -203,7 +214,7 @@ isCopilotReview r =
   case GH.reviewAuthor r of
     Just user ->
       let login = T.toLower (TL.toStrict (GH.userLogin user))
-      in T.isInfixOf "copilot" login
+       in T.isInfixOf "copilot" login
     Nothing -> False
 
 -- | Extract the slug (last dot-segment) from a branch name.
@@ -236,59 +247,78 @@ doMerge args = do
 
       void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mergeMsg), Log.infoRequestFields = ""})
 
-      pullOk <- if mergeSuccess
-        then do
-          let eventPayload = BSL.toStrict $ Aeson.encode $ object
-                [ "pr_number" .= mprPrNumber args,
-                  "success" .= True
-                ]
-          void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-            { Log.emitEventRequestEventType = "pr.merged",
-              Log.emitEventRequestPayload = eventPayload,
-              Log.emitEventRequestTimestamp = 0
-            })
-
-          -- Fast-forward local branch after merge
-          pullOkStatus <- do
-            let pullReq = Proc.RunRequest
-                  { Proc.runRequestCommand = "git"
-                  , Proc.runRequestArgs = V.fromList ["pull"]
-                  , Proc.runRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args)
-                  , Proc.runRequestEnv = Map.empty
-                  , Proc.runRequestTimeoutMs = 30000
-                  }
-            pullResult <- suspendEffect @ProcessRun pullReq
-            case pullResult of
-              Left _ -> pure False
-              Right pullResp -> pure (Proc.runResponseExitCode pullResp == 0)
-
-          -- Auto-cleanup: close agent tab, remove worktree, unregister
-          case extractSlug branchName of
-            Just slug -> do
-              let cleanupReq = Agent.CleanupRequest
-                    { Agent.cleanupRequestIssue = TL.fromStrict slug
-                    , Agent.cleanupRequestForce = True
-                    , Agent.cleanupRequestSubrepo = ""
+      pullOk <-
+        if mergeSuccess
+          then do
+            let eventPayload =
+                  BSL.toStrict $
+                    Aeson.encode $
+                      object
+                        [ "pr_number" .= mprPrNumber args,
+                          "success" .= True
+                        ]
+            void $
+              suspendEffect_ @LogEmitEvent
+                ( Log.EmitEventRequest
+                    { Log.emitEventRequestEventType = "pr.merged",
+                      Log.emitEventRequestPayload = eventPayload,
+                      Log.emitEventRequestTimestamp = 0
                     }
-              cleanupResult <- suspendEffect @AgentCleanup cleanupReq
-              case cleanupResult of
-                Left cleanupErr -> void $ suspendEffect_ @LogInfo (Log.InfoRequest
-                  { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleanup failed (non-fatal): " <> T.pack (show cleanupErr))
-                  , Log.infoRequestFields = ""
-                  })
-                Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest
-                  { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleaned up agent " <> slug)
-                  , Log.infoRequestFields = ""
-                  })
-            Nothing -> pure ()
+                )
 
-          pure pullOkStatus
-        else pure True
+            -- Fast-forward local branch after merge
+            pullOkStatus <- do
+              let pullReq =
+                    Proc.RunRequest
+                      { Proc.runRequestCommand = "git",
+                        Proc.runRequestArgs = V.fromList ["pull"],
+                        Proc.runRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args),
+                        Proc.runRequestEnv = Map.empty,
+                        Proc.runRequestTimeoutMs = 30000
+                      }
+              pullResult <- suspendEffect @ProcessRun pullReq
+              case pullResult of
+                Left _ -> pure False
+                Right pullResp -> pure (Proc.runResponseExitCode pullResp == 0)
 
-      pure $ Right $ MergePROutput
-        { mpoSuccess = mergeSuccess,
-          mpoMessage = mergeMsg,
-          mpoGitFetched = gitFetched,
-          mpoBranchName = branchName,
-          mpoPullOk = pullOk
-        }
+            -- Auto-cleanup: close agent tab, remove worktree, unregister
+            case extractSlug branchName of
+              Just slug -> do
+                let cleanupReq =
+                      Agent.CleanupRequest
+                        { Agent.cleanupRequestIssue = TL.fromStrict slug,
+                          Agent.cleanupRequestForce = True,
+                          Agent.cleanupRequestSubrepo = ""
+                        }
+                cleanupResult <- suspendEffect @AgentCleanup cleanupReq
+                case cleanupResult of
+                  Left cleanupErr ->
+                    void $
+                      suspendEffect_ @LogInfo
+                        ( Log.InfoRequest
+                            { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleanup failed (non-fatal): " <> T.pack (show cleanupErr)),
+                              Log.infoRequestFields = ""
+                            }
+                        )
+                  Right _ ->
+                    void $
+                      suspendEffect_ @LogInfo
+                        ( Log.InfoRequest
+                            { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleaned up agent " <> slug),
+                              Log.infoRequestFields = ""
+                            }
+                        )
+              Nothing -> pure ()
+
+            pure pullOkStatus
+          else pure True
+
+      pure $
+        Right $
+          MergePROutput
+            { mpoSuccess = mergeSuccess,
+              mpoMessage = mergeMsg,
+              mpoGitFetched = gitFetched,
+              mpoBranchName = branchName,
+              mpoPullOk = pullOk
+            }

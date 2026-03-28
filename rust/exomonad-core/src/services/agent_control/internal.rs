@@ -214,7 +214,10 @@ impl AgentControlService {
                 if flag.is_empty() {
                     format!("{}{} \"$(cat {})\"", cmd, perms_flags, escaped_path)
                 } else {
-                    format!("{}{} {} \"$(cat {})\"", cmd, perms_flags, flag, escaped_path)
+                    format!(
+                        "{}{} {} \"$(cat {})\"",
+                        cmd, perms_flags, flag, escaped_path
+                    )
                 }
             }
             _ => format!("{}{}", cmd, perms_flags),
@@ -251,14 +254,16 @@ impl AgentControlService {
         prompt: &str,
     ) -> Result<PathBuf> {
         let tmp_dir = project_dir.join(".exo/tmp");
-        tokio::fs::create_dir_all(&tmp_dir).await
+        tokio::fs::create_dir_all(&tmp_dir)
+            .await
             .context("Failed to create .exo/tmp/")?;
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
         let path = tmp_dir.join(format!("prompt-{}-{}.txt", ts, std::process::id()));
-        tokio::fs::write(&path, prompt).await
+        tokio::fs::write(&path, prompt)
+            .await
             .context("Failed to write prompt file")?;
         info!(path = %path.display(), agent = %agent_name, "Wrote prompt to temp file");
         Ok(path)
@@ -470,7 +475,13 @@ impl AgentControlService {
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
 
-        let mcp_content = Self::generate_mcp_config(agent_name, agent_type, role, &self.wasm_name, &self.extra_mcp_servers);
+        let mcp_content = Self::generate_mcp_config(
+            agent_name,
+            agent_type,
+            role,
+            &self.wasm_name,
+            &self.extra_mcp_servers,
+        );
 
         match agent_type {
             AgentType::Claude => {
@@ -526,7 +537,10 @@ impl AgentControlService {
             return;
         }
 
-        trust_map.insert(abs_path.clone(), serde_json::Value::String("TRUST_FOLDER".to_string()));
+        trust_map.insert(
+            abs_path.clone(),
+            serde_json::Value::String("TRUST_FOLDER".to_string()),
+        );
 
         if let Ok(content) = serde_json::to_string_pretty(&trust_map) {
             // Atomic write: temp file + rename to avoid partial writes from concurrent spawns
@@ -802,8 +816,13 @@ mod tests {
 
     #[test]
     fn test_claude_mcp_config_format() {
-        let config =
-            AgentControlService::generate_mcp_config("test-claude", AgentType::Claude, "tl", "devswarm", &HashMap::new());
+        let config = AgentControlService::generate_mcp_config(
+            "test-claude",
+            AgentType::Claude,
+            "tl",
+            "devswarm",
+            &HashMap::new(),
+        );
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["mcpServers"]["exomonad"]["type"], "stdio");
         assert_eq!(parsed["mcpServers"]["exomonad"]["command"], "exomonad");
@@ -816,8 +835,13 @@ mod tests {
 
     #[test]
     fn test_gemini_mcp_config_format() {
-        let config =
-            AgentControlService::generate_mcp_config("test-gemini", AgentType::Gemini, "dev", "devswarm", &HashMap::new());
+        let config = AgentControlService::generate_mcp_config(
+            "test-gemini",
+            AgentType::Gemini,
+            "dev",
+            "devswarm",
+            &HashMap::new(),
+        );
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["mcpServers"]["exomonad"]["command"], "exomonad");
         let args = parsed["mcpServers"]["exomonad"]["args"].as_array().unwrap();
@@ -863,7 +887,11 @@ mod tests {
 
     #[test]
     fn test_gemini_worker_settings_schema_compliance() {
-        let settings = AgentControlService::generate_gemini_worker_settings("test-worker", None, &HashMap::new());
+        let settings = AgentControlService::generate_gemini_worker_settings(
+            "test-worker",
+            None,
+            &HashMap::new(),
+        );
 
         // 1. MCP config uses stdio transport
         assert_eq!(settings["mcpServers"]["exomonad"]["type"], "stdio");

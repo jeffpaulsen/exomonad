@@ -762,10 +762,7 @@ impl fmt::Display for Address {
                 team,
                 member: Some(m),
             } => write!(f, "team:{}:{}", team, m),
-            Address::Team {
-                team,
-                member: None,
-            } => write!(f, "team:{}:lead", team),
+            Address::Team { team, member: None } => write!(f, "team:{}:lead", team),
             Address::Supervisor => write!(f, "supervisor"),
         }
     }

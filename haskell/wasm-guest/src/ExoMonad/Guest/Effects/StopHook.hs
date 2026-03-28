@@ -25,8 +25,9 @@ checkUncommittedWork :: Text -> Eff Effects (Maybe Text)
 checkUncommittedWork branch = do
   statusResult <- suspendEffect @GitGetStatus (Git.GetStatusRequest {Git.getStatusRequestWorkingDir = "."})
   let hasUncommitted = case statusResult of
-        Right resp -> not (null (Git.getStatusResponseDirtyFiles resp))
-                      || not (null (Git.getStatusResponseStagedFiles resp))
+        Right resp ->
+          not (null (Git.getStatusResponseDirtyFiles resp))
+            || not (null (Git.getStatusResponseStagedFiles resp))
         _ -> False
 
   unpushedResult <- suspendEffect @GitHasUnpushedCommits (Git.HasUnpushedCommitsRequest {Git.hasUnpushedCommitsRequestWorkingDir = ".", Git.hasUnpushedCommitsRequestRemote = "origin"})
@@ -36,9 +37,10 @@ checkUncommittedWork branch = do
 
   if hasUncommitted
     then pure $ Just $ "You have uncommitted changes on " <> branch <> " but no PR filed. Commit and file a PR before stopping."
-    else if hasUnpushed
-      then pure $ Just $ "Commits on " <> branch <> " aren't in a PR yet. File a PR before stopping."
-      else pure Nothing
+    else
+      if hasUnpushed
+        then pure $ Just $ "Commits on " <> branch <> " aren't in a PR yet. File a PR before stopping."
+        else pure Nothing
 
 -- | Check if the agent is on a non-main branch with no PR filed.
 -- Returns a nudge message if so. This catches agents that exit without
@@ -47,7 +49,7 @@ checkPRNotFiled :: Text -> Eff Effects (Maybe Text)
 checkPRNotFiled branch = do
   repoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
   case repoResult of
-    Left _ -> pure Nothing  -- can't determine repo, don't block
+    Left _ -> pure Nothing -- can't determine repo, don't block
     Right repoInfo -> do
       let owner = Git.getRepoInfoResponseOwner repoInfo
           repo = Git.getRepoInfoResponseName repoInfo
@@ -56,12 +58,14 @@ checkPRNotFiled branch = do
       if TL.null owner || TL.null repo
         then pure Nothing
         else do
-          prResult <- suspendEffect @GitHubGetPullRequestForBranch
-            (GH.GetPullRequestForBranchRequest
-              { GH.getPullRequestForBranchRequestOwner = owner
-              , GH.getPullRequestForBranchRequestRepo = repo
-              , GH.getPullRequestForBranchRequestBranch = TL.fromStrict branch
-              })
+          prResult <-
+            suspendEffect @GitHubGetPullRequestForBranch
+              ( GH.GetPullRequestForBranchRequest
+                  { GH.getPullRequestForBranchRequestOwner = owner,
+                    GH.getPullRequestForBranchRequestRepo = repo,
+                    GH.getPullRequestForBranchRequestBranch = TL.fromStrict branch
+                  }
+              )
           case prResult of
             Right resp
               | GH.getPullRequestForBranchResponseFound resp ->

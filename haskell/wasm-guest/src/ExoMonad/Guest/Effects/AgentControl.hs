@@ -149,14 +149,16 @@ data SpawnWorkerConfig = SpawnWorkerConfig
   { swcName :: Text,
     swcPrompt :: Text,
     swcPerms :: PermissionFlags
-  } deriving (Show, Eq, Generic)
+  }
+  deriving (Show, Eq, Generic)
 
 -- | Configuration for spawning an ACP agent.
 data SpawnAcpConfig = SpawnAcpConfig
   { sacName :: Text,
     sacPrompt :: Text,
     sacPerms :: PermissionFlags
-  } deriving (Show, Eq, Generic)
+  }
+  deriving (Show, Eq, Generic)
 
 -- | Agent control effect for spawning agents.
 data AgentControl a where

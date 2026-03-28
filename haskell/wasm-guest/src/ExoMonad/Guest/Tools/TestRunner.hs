@@ -20,21 +20,21 @@ module ExoMonad.Guest.Tools.TestRunner
   )
 where
 
+import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
+import Data.Aeson qualified as Aeson
+import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Control.Monad.Freer (Eff)
+import Data.Vector qualified as V
+import Effects.Process qualified as Proc
+import ExoMonad.Effects.Events qualified as ProtoEvents
+import ExoMonad.Effects.Process (ProcessRun)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect)
 import ExoMonad.Guest.Types (Effects)
-import ExoMonad.Effects.Events qualified as ProtoEvents
-import ExoMonad.Effects.Process (ProcessRun)
-import Effects.Process qualified as Proc
 import GHC.Generics (Generic)
-import Data.Aeson qualified as Aeson
-import Data.Map qualified as Map
-import Data.Vector qualified as V
 
 --------------------------------------------------------------------------------
 -- Instruct
@@ -66,21 +66,27 @@ instructSchema =
 -- | Core instruct I/O: send message to root via events.send_message effect.
 instructCore :: InstructArgs -> Eff Effects (Either Text Value)
 instructCore args = do
-  let address = ProtoEvents.Address
-        { ProtoEvents.addressKind = Just (ProtoEvents.AddressKindAgent "root")
-        }
-  result <- suspendEffect @ProtoEvents.EventsSendMessage
-              (ProtoEvents.SendMessageRequest
-                { ProtoEvents.sendMessageRequestRecipient = Just address,
-                  ProtoEvents.sendMessageRequestContent = TL.fromStrict (iaContent args),
-                  ProtoEvents.sendMessageRequestSummary = "test instruction"
-                })
+  let address =
+        ProtoEvents.Address
+          { ProtoEvents.addressKind = Just (ProtoEvents.AddressKindAgent "root")
+          }
+  result <-
+    suspendEffect @ProtoEvents.EventsSendMessage
+      ( ProtoEvents.SendMessageRequest
+          { ProtoEvents.sendMessageRequestRecipient = Just address,
+            ProtoEvents.sendMessageRequestContent = TL.fromStrict (iaContent args),
+            ProtoEvents.sendMessageRequestSummary = "test instruction"
+          }
+      )
   case result of
     Left err -> pure $ Left ("instruct failed: " <> T.pack (show err))
-    Right resp -> pure $ Right $ object
-      [ "success" .= ProtoEvents.sendMessageResponseSuccess resp,
-        "delivery_method" .= ProtoEvents.sendMessageResponseDeliveryMethod resp
-      ]
+    Right resp ->
+      pure $
+        Right $
+          object
+            [ "success" .= ProtoEvents.sendMessageResponseSuccess resp,
+              "delivery_method" .= ProtoEvents.sendMessageResponseDeliveryMethod resp
+            ]
 
 --------------------------------------------------------------------------------
 -- Post Review
@@ -88,9 +94,9 @@ instructCore args = do
 
 -- | Args for the post_review tool.
 data PostReviewArgs = PostReviewArgs
-  { praPrNumber :: Int
-  , praState :: Text
-  , praBody :: Text
+  { praPrNumber :: Int,
+    praState :: Text,
+    praBody :: Text
   }
   deriving (Generic, Show)
 
@@ -102,11 +108,12 @@ instance FromJSON PostReviewArgs where
       <*> v .: "body"
 
 instance ToJSON PostReviewArgs where
-  toJSON args = object
-    [ "pr_number" .= praPrNumber args
-    , "state" .= praState args
-    , "body" .= praBody args
-    ]
+  toJSON args =
+    object
+      [ "pr_number" .= praPrNumber args,
+        "state" .= praState args,
+        "body" .= praBody args
+      ]
 
 postReviewDescription :: Text
 postReviewDescription =
@@ -118,35 +125,43 @@ postReviewDescription =
 postReviewSchema :: Aeson.Object
 postReviewSchema =
   genericToolSchemaWith @PostReviewArgs
-    [ ("pr_number", "The PR number to review")
-    , ("state", "Review state: CHANGES_REQUESTED, APPROVED, or COMMENTED")
-    , ("body", "Review body text — the feedback for the agent to address")
+    [ ("pr_number", "The PR number to review"),
+      ("state", "Review state: CHANGES_REQUESTED, APPROVED, or COMMENTED"),
+      ("body", "Review body text — the feedback for the agent to address")
     ]
 
 -- | Core post_review I/O: calls post_review.sh via process.run effect.
 postReviewCore :: PostReviewArgs -> Eff Effects (Either Text Value)
 postReviewCore args = do
-  result <- suspendEffect @ProcessRun
-              (Proc.RunRequest
-                { Proc.runRequestCommand = "./post_review.sh"
-                , Proc.runRequestArgs = V.fromList
-                    [ TL.pack (show (praPrNumber args))
-                    , TL.fromStrict (praState args)
-                    , TL.fromStrict (praBody args)
-                    ]
-                , Proc.runRequestWorkingDir = "."
-                , Proc.runRequestEnv = Map.empty
-                , Proc.runRequestTimeoutMs = 10000
-                })
+  result <-
+    suspendEffect @ProcessRun
+      ( Proc.RunRequest
+          { Proc.runRequestCommand = "./post_review.sh",
+            Proc.runRequestArgs =
+              V.fromList
+                [ TL.pack (show (praPrNumber args)),
+                  TL.fromStrict (praState args),
+                  TL.fromStrict (praBody args)
+                ],
+            Proc.runRequestWorkingDir = ".",
+            Proc.runRequestEnv = Map.empty,
+            Proc.runRequestTimeoutMs = 10000
+          }
+      )
   case result of
     Left err -> pure $ Left ("post_review failed: " <> T.pack (show err))
     Right resp
       | Proc.runResponseExitCode resp == 0 ->
-          pure $ Right $ object
-            [ "success" .= True
-            , "output" .= TL.toStrict (Proc.runResponseStdout resp)
-            ]
+          pure $
+            Right $
+              object
+                [ "success" .= True,
+                  "output" .= TL.toStrict (Proc.runResponseStdout resp)
+                ]
       | otherwise ->
-          pure $ Left $ "post_review.sh failed (exit "
-            <> T.pack (show (Proc.runResponseExitCode resp))
-            <> "): " <> TL.toStrict (Proc.runResponseStderr resp)
+          pure $
+            Left $
+              "post_review.sh failed (exit "
+                <> T.pack (show (Proc.runResponseExitCode resp))
+                <> "): "
+                <> TL.toStrict (Proc.runResponseStderr resp)

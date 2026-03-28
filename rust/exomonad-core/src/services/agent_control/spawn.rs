@@ -326,7 +326,9 @@ impl AgentControlService {
     ) -> serde_json::Value {
         let mut context_files = vec![serde_json::Value::String("GEMINI.md".to_string())];
         if let Some(path) = context_path {
-            context_files.push(serde_json::Value::String(path.to_string_lossy().to_string()));
+            context_files.push(serde_json::Value::String(
+                path.to_string_lossy().to_string(),
+            ));
         }
         let mut settings = serde_json::json!({
             "mcpServers": {

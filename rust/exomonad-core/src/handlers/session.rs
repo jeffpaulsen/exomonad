@@ -140,14 +140,10 @@ impl SessionEffects for SessionHandler {
                 ));
             }
 
-            let supervisor_name =
-                crate::domain::AgentName::try_from(req.supervisor.clone()).map_err(|e| {
-                    crate::effects::EffectError::invalid_input(e.to_string())
-                })?;
-            let team_name =
-                crate::domain::TeamName::try_from(req.team.clone()).map_err(|e| {
-                    crate::effects::EffectError::invalid_input(e.to_string())
-                })?;
+            let supervisor_name = crate::domain::AgentName::try_from(req.supervisor.clone())
+                .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
+            let team_name = crate::domain::TeamName::try_from(req.team.clone())
+                .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
 
             info!(
                 supervisor = %req.supervisor,
@@ -186,7 +182,10 @@ impl SessionEffects for SessionHandler {
     ) -> EffectResult<DeregisterSupervisorResponse> {
         if let Some(ref supervisor_registry) = self.supervisor_registry {
             let children: Vec<String> = req.children.into_iter().collect();
-            info!(children_count = children.len(), "Deregistering supervisor for children");
+            info!(
+                children_count = children.len(),
+                "Deregistering supervisor for children"
+            );
             supervisor_registry.deregister(&children).await;
         }
         Ok(DeregisterSupervisorResponse { success: true })

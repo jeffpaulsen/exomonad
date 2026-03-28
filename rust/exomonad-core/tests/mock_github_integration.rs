@@ -18,8 +18,8 @@ impl MockServer {
     /// Start mock_github.py on an ephemeral port.
     fn start() -> Self {
         let port = pick_free_port();
-        let mock_script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/e2e/mock_github.py");
+        let mock_script =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/e2e/mock_github.py");
 
         let child = Command::new("python3")
             .args([mock_script.to_str().unwrap(), "--port", &port.to_string()])
