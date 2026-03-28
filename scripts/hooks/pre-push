@@ -9,6 +9,12 @@ set -e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# Git hooks run with GIT_DIR set, which propagates through cargo test into
+# test subprocesses. Tests that spawn `git config` or `git commit` in tempdirs
+# would operate on THIS repo instead of the tempdir, creating stray commits
+# and corrupting the worktree's git config.
+unset GIT_DIR
+
 if ! command -v just &> /dev/null; then
     echo "ERROR: 'just' command not found. Install with: cargo install just"
     exit 1
