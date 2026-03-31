@@ -601,9 +601,30 @@ impl GitHubPoller {
 
         let mut pr_map = HashMap::new();
         for pr in prs {
+            // Validate external data from GitHub before constructing domain types.
+            if pr.head.ref_field.is_empty() {
+                tracing::warn!(
+                    "GitHubPoller: skipping PR {} due to empty head.ref_field",
+                    pr.number
+                );
+                continue;
+            }
+            if pr.head.sha.is_empty() {
+                tracing::warn!(
+                    "GitHubPoller: skipping PR {} due to empty head.sha",
+                    pr.number
+                );
+                continue;
+            }
+            if pr.number == 0 {
+                tracing::warn!("GitHubPoller: skipping PR with non-positive number: 0");
+                continue;
+            }
+
             let ref_name = BranchName::from(pr.head.ref_field.as_str());
             let sha = CommitSha::from(pr.head.sha.as_str());
-            pr_map.insert(ref_name, (PRNumber::new(pr.number), sha));
+            let pr_number = PRNumber::new(pr.number);
+            pr_map.insert(ref_name, (pr_number, sha));
         }
 
         // 3. Match branches to PRs
