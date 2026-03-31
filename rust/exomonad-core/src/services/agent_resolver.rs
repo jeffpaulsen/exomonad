@@ -300,7 +300,7 @@ impl AgentResolver {
         for (name, record) in records.iter() {
             if &record.slug == slug
                 && record.topology == Topology::WorktreePerAgent
-                && exclude_name.map_or(true, |ex| ex != name)
+                && (exclude_name != Some(name))
             {
                 return Some(name.clone());
             }

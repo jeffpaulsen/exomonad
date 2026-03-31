@@ -192,7 +192,7 @@ impl EventEffects for EventHandler {
                 Address::Supervisor => unreachable!(),
             };
 
-            let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
+            let status = crate::services::delivery::NotifyStatus::parse(&req.status);
             crate::services::delivery::notify_parent_delivery(
                 Some(&*self.team_registry),
                 Some(&*self.acp_registry),
@@ -225,7 +225,7 @@ impl EventEffects for EventHandler {
                 Some(&*self.agent_resolver),
             );
 
-            let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
+            let status = crate::services::delivery::NotifyStatus::parse(&req.status);
             crate::services::delivery::notify_parent_delivery(
                 Some(&*self.team_registry),
                 Some(&*self.acp_registry),
@@ -267,7 +267,7 @@ impl EventEffects for EventHandler {
             Some(&*self.agent_resolver),
         );
 
-        let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
+        let status = crate::services::delivery::NotifyStatus::parse(&req.status);
         crate::services::delivery::notify_parent_delivery(
             Some(&*self.team_registry),
             Some(&*self.acp_registry),

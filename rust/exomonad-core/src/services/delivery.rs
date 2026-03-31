@@ -27,7 +27,7 @@ pub enum NotifyStatus {
 
 impl NotifyStatus {
     /// Parse from proto/wire string ("failure" → Failure, anything else → Success).
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "failure" => NotifyStatus::Failure,
             _ => NotifyStatus::Success,
@@ -232,6 +232,7 @@ pub async fn route_message(
 
 /// Resolve team lead and deliver. Uses `config.json`'s `leadAgentId` to find
 /// the lead, falls back to first in-memory entry, then to "root".
+#[allow(clippy::too_many_arguments)]
 async fn resolve_and_deliver_to_lead(
     team_name: &str,
     team_registry: Option<&TeamRegistry>,
@@ -861,7 +862,7 @@ mod tests {
     #[test]
     fn test_format_parent_notification_other_status() {
         let id = crate::domain::AgentName::from("agent-3");
-        let msg = format_parent_notification(&id, NotifyStatus::from_str("running"), "Working...");
+        let msg = format_parent_notification(&id, NotifyStatus::parse("running"), "Working...");
         assert_eq!(msg, "[from: agent-3] Working...");
     }
 
