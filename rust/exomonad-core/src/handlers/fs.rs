@@ -219,6 +219,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_read_file() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let file_path = dir.path().join("hello.txt");
+        std::fs::write(&file_path, "hello world").unwrap();
+
+        let resp = handler
+            .read_file(
+                ReadFileRequest {
+                    path: file_path.to_string_lossy().to_string(),
+                    max_bytes: 0,
+                    offset: 0,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.content, "hello world");
+        assert_eq!(resp.bytes_read, 11);
+        assert!(!resp.truncated);
+    }
+
+    #[tokio::test]
+    async fn test_read_file_truncated() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let file_path = dir.path().join("big.txt");
+        std::fs::write(&file_path, "abcdefghij").unwrap();
+
+        let resp = handler
+            .read_file(
+                ReadFileRequest {
+                    path: file_path.to_string_lossy().to_string(),
+                    max_bytes: 5,
+                    offset: 0,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        // bytes_read reflects original file size, not truncated size
+        assert_eq!(resp.bytes_read, 10);
+        assert!(resp.truncated);
+        assert_eq!(resp.content.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_read_file_nonexistent() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let result = handler
+            .read_file(
+                ReadFileRequest {
+                    path: dir.path().join("nope.txt").to_string_lossy().to_string(),
+                    max_bytes: 0,
+                    offset: 0,
+                },
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_write_file() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let file_path = dir.path().join("out.txt");
+        let resp = handler
+            .write_file(
+                WriteFileRequest {
+                    path: file_path.to_string_lossy().to_string(),
+                    content: "written".into(),
+                    create_parents: false,
+                    append: false,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.bytes_written, 7);
+        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "written");
+    }
+
+    #[tokio::test]
+    async fn test_write_file_create_parents() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let file_path = dir.path().join("a").join("b").join("c.txt");
+        let resp = handler
+            .write_file(
+                WriteFileRequest {
+                    path: file_path.to_string_lossy().to_string(),
+                    content: "nested".into(),
+                    create_parents: true,
+                    append: false,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.bytes_written, 6);
+        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "nested");
+    }
+
+    #[tokio::test]
     async fn test_file_exists() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
@@ -227,19 +343,52 @@ mod tests {
         let file_path = dir.path().join("exists.txt");
         std::fs::write(&file_path, "hello").unwrap();
 
-        let req = FileExistsRequest {
-            path: file_path.to_string_lossy().to_string(),
-        };
-        let resp = handler.file_exists(req, &ctx).await.unwrap();
+        let resp = handler
+            .file_exists(
+                FileExistsRequest {
+                    path: file_path.to_string_lossy().to_string(),
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(resp.exists);
         assert!(resp.is_file);
         assert!(!resp.is_directory);
 
-        let req_none = FileExistsRequest {
-            path: dir.path().join("none").to_string_lossy().to_string(),
-        };
-        let resp_none = handler.file_exists(req_none, &ctx).await.unwrap();
+        let resp_none = handler
+            .file_exists(
+                FileExistsRequest {
+                    path: dir.path().join("none").to_string_lossy().to_string(),
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(!resp_none.exists);
+    }
+
+    #[tokio::test]
+    async fn test_file_exists_directory() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let sub = dir.path().join("subdir");
+        std::fs::create_dir(&sub).unwrap();
+
+        let resp = handler
+            .file_exists(
+                FileExistsRequest {
+                    path: sub.to_string_lossy().to_string(),
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(resp.exists);
+        assert!(!resp.is_file);
+        assert!(resp.is_directory);
     }
 
     #[tokio::test]
@@ -265,6 +414,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_list_directory_hidden_files() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        std::fs::write(dir.path().join("visible.txt"), "").unwrap();
+        std::fs::write(dir.path().join(".hidden"), "").unwrap();
+
+        // Without include_hidden
+        let resp = handler
+            .list_directory(
+                ListDirectoryRequest {
+                    path: dir.path().to_string_lossy().to_string(),
+                    include_hidden: false,
+                    include_metadata: false,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.count, 1);
+        assert_eq!(resp.entries[0].name, "visible.txt");
+
+        // With include_hidden
+        let resp = handler
+            .list_directory(
+                ListDirectoryRequest {
+                    path: dir.path().to_string_lossy().to_string(),
+                    include_hidden: true,
+                    include_metadata: false,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_directory_with_metadata() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        std::fs::write(dir.path().join("file.txt"), "12345").unwrap();
+
+        let resp = handler
+            .list_directory(
+                ListDirectoryRequest {
+                    path: dir.path().to_string_lossy().to_string(),
+                    include_hidden: false,
+                    include_metadata: true,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.count, 1);
+        assert_eq!(resp.entries[0].size, 5);
+        assert!(resp.entries[0].modified_at > 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_directory_nonexistent() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let result = handler
+            .list_directory(
+                ListDirectoryRequest {
+                    path: dir.path().join("nope").to_string_lossy().to_string(),
+                    include_hidden: false,
+                    include_metadata: false,
+                },
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_delete_file() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
@@ -273,12 +504,60 @@ mod tests {
         let file_path = dir.path().join("delete_me.txt");
         std::fs::write(&file_path, "bye").unwrap();
 
-        let req = DeleteFileRequest {
-            path: file_path.to_string_lossy().to_string(),
-            recursive: false,
-        };
-        let resp = handler.delete_file(req, &ctx).await.unwrap();
+        let resp = handler
+            .delete_file(
+                DeleteFileRequest {
+                    path: file_path.to_string_lossy().to_string(),
+                    recursive: false,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(resp.deleted);
         assert!(!file_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let resp = handler
+            .delete_file(
+                DeleteFileRequest {
+                    path: dir.path().join("ghost.txt").to_string_lossy().to_string(),
+                    recursive: false,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!resp.deleted);
+    }
+
+    #[tokio::test]
+    async fn test_delete_directory_recursive() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let sub = dir.path().join("to_delete");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("inner.txt"), "").unwrap();
+
+        let resp = handler
+            .delete_file(
+                DeleteFileRequest {
+                    path: sub.to_string_lossy().to_string(),
+                    recursive: true,
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(resp.deleted);
+        assert!(!sub.exists());
     }
 }
