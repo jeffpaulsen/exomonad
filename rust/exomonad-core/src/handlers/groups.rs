@@ -58,7 +58,6 @@ pub fn git_handlers(
 pub fn orchestration_handlers(
     agent_control: Arc<AgentControlService>,
     services: Arc<Services>,
-    _project_dir: PathBuf,
     event_queue_scope: Option<String>,
 ) -> Vec<Box<dyn EffectHandler>> {
     let tasks_dir = dirs::home_dir().unwrap_or_default().join(".claude/tasks");

@@ -975,7 +975,6 @@ Run `exomonad recompile` first to build it.",
     builder = builder.with_handlers(exomonad_core::orchestration_handlers(
         agent_control.clone(),
         services.clone(),
-        project_dir.clone(),
         Some(event_session_id),
     ));
     let rt = builder.build().await.context("Failed to build runtime")?;
