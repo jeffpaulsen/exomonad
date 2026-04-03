@@ -964,10 +964,7 @@ Run `exomonad recompile` first to build it.",
             "tasks".to_string(),
         ]);
 
-    builder = builder.with_handlers(exomonad_core::core_handlers(
-        project_dir.clone(),
-        services.clone(),
-    ));
+    builder = builder.with_handlers(exomonad_core::core_handlers(services.clone()));
     builder = builder.with_handlers(exomonad_core::git_handlers(services.clone(), git));
     builder = builder.with_handlers(exomonad_core::orchestration_handlers(
         agent_control.clone(),

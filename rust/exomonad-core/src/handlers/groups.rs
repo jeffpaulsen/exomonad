@@ -1,9 +1,7 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::effects::EffectHandler;
 use crate::services::agent_control::AgentControlService;
-use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
 use crate::services::github::GitHubService;
 use crate::services::Services;
@@ -15,13 +13,11 @@ use super::{
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
-pub fn core_handlers(project_dir: PathBuf, services: Arc<Services>) -> Vec<Box<dyn EffectHandler>> {
+pub fn core_handlers(services: Arc<Services>) -> Vec<Box<dyn EffectHandler>> {
     vec![
-        Box::new(LogHandler::new(services)),
-        Box::new(KvHandler::new(project_dir.clone())),
-        Box::new(FsHandler::new(Arc::new(FileSystemService::new(
-            project_dir,
-        )))),
+        Box::new(LogHandler::new(services.clone())),
+        Box::new(KvHandler::new(services.clone())),
+        Box::new(FsHandler::new(services.clone())),
         Box::new(ProcessHandler::new()),
     ]
 }
@@ -73,7 +69,6 @@ mod tests {
     use crate::services::GitHubClient;
     use std::future::Future;
     use std::pin::Pin;
-    use tempfile::tempdir;
 
     struct MockExecutor;
     impl CommandExecutor for MockExecutor {
@@ -88,9 +83,8 @@ mod tests {
 
     #[test]
     fn test_core_handlers() {
-        let tmp = tempdir().unwrap();
         let services = Arc::new(Services::test());
-        let handlers = core_handlers(tmp.path().to_path_buf(), services);
+        let handlers = core_handlers(services);
         assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"log"));

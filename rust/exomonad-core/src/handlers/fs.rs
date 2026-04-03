@@ -4,6 +4,7 @@
 
 use crate::effects::{dispatch_fs_effect, EffectError, EffectResult, FilesystemEffects, ResultExt};
 use crate::services::filesystem::FileSystemService;
+use crate::services::HasProjectDir;
 use async_trait::async_trait;
 use exomonad_proto::effects::fs::*;
 use std::sync::Arc;
@@ -12,20 +13,37 @@ use std::sync::Arc;
 ///
 /// Handles all effects in the `fs.*` namespace by delegating to
 /// the generated `dispatch_filesystem_effect` function.
-pub struct FsHandler {
-    service: Arc<FileSystemService>,
+pub struct FsHandler<C> {
+    #[allow(dead_code)]
+    ctx: Arc<C>,
+    service: FileSystemService,
 }
 
-impl FsHandler {
-    pub fn new(service: Arc<FileSystemService>) -> Self {
-        Self { service }
+impl<C: HasProjectDir> FsHandler<C> {
+    pub fn new(ctx: Arc<C>) -> Self {
+        let service = FileSystemService::new(ctx.project_dir().to_path_buf());
+        Self { ctx, service }
     }
 }
 
-crate::impl_pass_through_handler!(FsHandler, "fs", dispatch_fs_effect);
+#[async_trait]
+impl<C: HasProjectDir + 'static> crate::effects::EffectHandler for FsHandler<C> {
+    fn namespace(&self) -> &str {
+        "fs"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> crate::effects::EffectResult<Vec<u8>> {
+        dispatch_fs_effect(self, effect_type, payload, ctx).await
+    }
+}
 
 #[async_trait]
-impl FilesystemEffects for FsHandler {
+impl<C: HasProjectDir + 'static> FilesystemEffects for FsHandler<C> {
     async fn read_file(
         &self,
         req: ReadFileRequest,
@@ -183,7 +201,24 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch};
     use crate::effects::{EffectContext, EffectHandler};
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    struct TestCtx {
+        project_dir: PathBuf,
+    }
+
+    impl HasProjectDir for TestCtx {
+        fn project_dir(&self) -> &Path {
+            &self.project_dir
+        }
+    }
+
+    fn make_handler(dir: &Path) -> FsHandler<TestCtx> {
+        FsHandler::new(Arc::new(TestCtx {
+            project_dir: dir.to_path_buf(),
+        }))
+    }
 
     fn test_ctx() -> EffectContext {
         EffectContext {
@@ -196,16 +231,14 @@ mod tests {
     #[test]
     fn test_fs_handler_new() {
         let dir = tempdir().unwrap();
-        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
-        let handler = FsHandler::new(service);
+        let handler = make_handler(dir.path());
         assert_eq!(handler.namespace(), "fs");
     }
 
     #[tokio::test]
     async fn test_file_exists() {
         let dir = tempdir().unwrap();
-        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
-        let handler = FsHandler::new(service);
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         let file_path = dir.path().join("exists.txt");
@@ -229,8 +262,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_directory() {
         let dir = tempdir().unwrap();
-        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
-        let handler = FsHandler::new(service);
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
@@ -252,8 +284,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_file() {
         let dir = tempdir().unwrap();
-        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
-        let handler = FsHandler::new(service);
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         let file_path = dir.path().join("delete_me.txt");

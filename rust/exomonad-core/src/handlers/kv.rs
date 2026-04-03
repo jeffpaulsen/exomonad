@@ -4,26 +4,28 @@
 //! Keys are validated to contain only alphanumeric characters, underscores, and hyphens.
 
 use crate::effects::{dispatch_kv_effect, EffectError, EffectResult, KvEffects};
+use crate::services::HasProjectDir;
 use async_trait::async_trait;
 use exomonad_proto::effects::kv::*;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Key-value storage effect handler.
 ///
 /// Persists values as individual JSON files under `.exo/kv/` in the project directory.
-pub struct KvHandler {
-    project_dir: PathBuf,
+pub struct KvHandler<C> {
+    ctx: Arc<C>,
 }
 
-impl KvHandler {
+impl<C: HasProjectDir> KvHandler<C> {
     /// Create a new KV handler rooted at the given project directory.
-    pub fn new(project_dir: PathBuf) -> Self {
-        Self { project_dir }
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 
     /// Path to the KV storage directory.
     fn kv_dir(&self) -> PathBuf {
-        self.project_dir.join(".exo").join("kv")
+        self.ctx.project_dir().join(".exo").join("kv")
     }
 
     /// Path to a specific key's file.
@@ -49,10 +51,24 @@ impl KvHandler {
     }
 }
 
-crate::impl_pass_through_handler!(KvHandler, "kv", dispatch_kv_effect);
+#[async_trait]
+impl<C: HasProjectDir + 'static> crate::effects::EffectHandler for KvHandler<C> {
+    fn namespace(&self) -> &str {
+        "kv"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> crate::effects::EffectResult<Vec<u8>> {
+        dispatch_kv_effect(self, effect_type, payload, ctx).await
+    }
+}
 
 #[async_trait]
-impl KvEffects for KvHandler {
+impl<C: HasProjectDir + 'static> KvEffects for KvHandler<C> {
     async fn get(
         &self,
         req: GetRequest,
@@ -156,7 +172,7 @@ impl KvEffects for KvHandler {
 
                 // Check if branch exists
                 let output = tokio::process::Command::new("git")
-                    .current_dir(&self.project_dir)
+                    .current_dir(self.ctx.project_dir())
                     .args(["branch", "--list", &branch])
                     .output()
                     .await;
@@ -195,6 +211,23 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch};
     use crate::effects::EffectContext;
+    use std::path::Path;
+
+    struct TestCtx {
+        project_dir: PathBuf,
+    }
+
+    impl HasProjectDir for TestCtx {
+        fn project_dir(&self) -> &Path {
+            &self.project_dir
+        }
+    }
+
+    fn make_handler(dir: &Path) -> KvHandler<TestCtx> {
+        KvHandler::new(Arc::new(TestCtx {
+            project_dir: dir.to_path_buf(),
+        }))
+    }
 
     fn test_ctx() -> EffectContext {
         EffectContext {
@@ -206,27 +239,27 @@ mod tests {
 
     #[test]
     fn test_validate_key_valid() {
-        assert!(KvHandler::validate_key("my-key").is_ok());
-        assert!(KvHandler::validate_key("my_key").is_ok());
-        assert!(KvHandler::validate_key("key123").is_ok());
-        assert!(KvHandler::validate_key("a").is_ok());
-        assert!(KvHandler::validate_key("ABC-def_123").is_ok());
+        assert!(KvHandler::<TestCtx>::validate_key("my-key").is_ok());
+        assert!(KvHandler::<TestCtx>::validate_key("my_key").is_ok());
+        assert!(KvHandler::<TestCtx>::validate_key("key123").is_ok());
+        assert!(KvHandler::<TestCtx>::validate_key("a").is_ok());
+        assert!(KvHandler::<TestCtx>::validate_key("ABC-def_123").is_ok());
     }
 
     #[test]
     fn test_validate_key_invalid() {
-        assert!(KvHandler::validate_key("").is_err());
-        assert!(KvHandler::validate_key("../etc/passwd").is_err());
-        assert!(KvHandler::validate_key("key with spaces").is_err());
-        assert!(KvHandler::validate_key("key/slash").is_err());
-        assert!(KvHandler::validate_key("key.dot").is_err());
-        assert!(KvHandler::validate_key("key\0null").is_err());
+        assert!(KvHandler::<TestCtx>::validate_key("").is_err());
+        assert!(KvHandler::<TestCtx>::validate_key("../etc/passwd").is_err());
+        assert!(KvHandler::<TestCtx>::validate_key("key with spaces").is_err());
+        assert!(KvHandler::<TestCtx>::validate_key("key/slash").is_err());
+        assert!(KvHandler::<TestCtx>::validate_key("key.dot").is_err());
+        assert!(KvHandler::<TestCtx>::validate_key("key\0null").is_err());
     }
 
     #[tokio::test]
     async fn test_get_missing_key() {
         let dir = tempfile::tempdir().unwrap();
-        let handler = KvHandler::new(dir.path().to_path_buf());
+        let handler = make_handler(dir.path());
 
         let ctx = test_ctx();
         let resp = handler
@@ -246,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_then_get() {
         let dir = tempfile::tempdir().unwrap();
-        let handler = KvHandler::new(dir.path().to_path_buf());
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         let set_resp = handler
@@ -277,7 +310,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_overwrites() {
         let dir = tempfile::tempdir().unwrap();
-        let handler = KvHandler::new(dir.path().to_path_buf());
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         handler
@@ -358,7 +391,7 @@ mod tests {
             .await
             .unwrap();
 
-        let handler = KvHandler::new(dir.path().to_path_buf());
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         // Create some files
@@ -398,7 +431,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_key_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let handler = KvHandler::new(dir.path().to_path_buf());
+        let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
         let err = handler
