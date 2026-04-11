@@ -112,6 +112,8 @@ library wasm-guest-internal
         ExoMonad.Types
         -- Permissions
         ExoMonad.Permissions
+    other-modules:
+        ExoMonad.Guest.Tools.MergePRTests
     -- Additional dependencies (shared stanza provides common deps)
     build-depends:
         exomonad-pdk,
