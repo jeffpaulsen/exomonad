@@ -975,13 +975,9 @@ mod tests {
     }
 
     fn test_services(project_dir: PathBuf) -> Arc<crate::services::Services> {
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
-            project_dir.clone(),
-        ));
-        let mut services = crate::services::Services::test();
-        services.project_dir = project_dir;
-        services.git_wt = git_wt;
-        Arc::new(services)
+        Arc::new(crate::services::Services::test_with_project_dir(
+            project_dir,
+        ))
     }
 
     #[tokio::test]

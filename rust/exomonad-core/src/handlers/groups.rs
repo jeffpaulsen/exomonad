@@ -4,7 +4,7 @@ use crate::effects::EffectHandler;
 use crate::services::agent_control::AgentControlService;
 use crate::services::git::GitService;
 use crate::services::github::GitHubService;
-use crate::services::Services;
+use crate::services::{HasGitHubClient, Services};
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
@@ -33,7 +33,7 @@ pub fn git_handlers(services: Arc<Services>, git: Arc<GitService>) -> Vec<Box<dy
         Box::new(MergePRHandler::new(services.clone())),
         Box::new(CopilotHandler::new()),
     ];
-    if let Some(ref client) = services.github_client {
+    if let Some(client) = services.github_client() {
         handlers.push(Box::new(GitHubHandler::new(GitHubService::new(
             client.clone(),
         ))));
@@ -112,7 +112,7 @@ mod tests {
         let client = GitHubClient::new(5);
 
         let mut services_raw = Services::test();
-        services_raw.github_client = Some(client);
+        services_raw.set_github_client(client);
         let services = Arc::new(services_raw);
         let handlers = git_handlers(services, git);
         assert_eq!(handlers.len(), 5);

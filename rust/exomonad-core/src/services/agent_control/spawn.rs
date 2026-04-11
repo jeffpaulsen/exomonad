@@ -955,12 +955,7 @@ mod tests {
         let agent_wt = project_dir.join("agent-wt");
         fs::create_dir_all(&agent_wt).await.unwrap();
 
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
-            project_dir.clone(),
-        ));
-        let mut services = crate::services::Services::test();
-        services.project_dir = project_dir.clone();
-        services.git_wt = git_wt;
+        let services = crate::services::Services::test_with_project_dir(project_dir.clone());
         let service = AgentControlService::new(Arc::new(services));
 
         // Test valid copy

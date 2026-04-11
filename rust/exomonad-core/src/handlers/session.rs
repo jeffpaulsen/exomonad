@@ -273,7 +273,11 @@ mod tests {
         let resp = handler.register_claude_id(req, &ctx).await.unwrap();
         assert!(resp.success);
 
-        let registered = services.claude_session_registry.get("test").await.unwrap();
+        let registered = services
+            .claude_session_registry()
+            .get("test")
+            .await
+            .unwrap();
         assert_eq!(
             registered.to_string(),
             "7343ced0-1d95-450a-8ae5-976fe94421f0"
@@ -294,11 +298,11 @@ mod tests {
         let resp = handler.register_team(req, &ctx).await.unwrap();
         assert!(resp.success);
 
-        let info = services.team_registry.get("test").await.unwrap();
+        let info = services.team_registry().get("test").await.unwrap();
         assert_eq!(info.team_name, "test-team");
         assert_eq!(info.inbox_name, "test-inbox");
 
-        let info_bb = services.team_registry.get("main").await.unwrap();
+        let info_bb = services.team_registry().get("main").await.unwrap();
         assert_eq!(info_bb.team_name, "test-team");
     }
 
@@ -319,8 +323,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(services.team_registry.get("test").await.is_some());
-        assert!(services.team_registry.get("main").await.is_some());
+        assert!(services.team_registry().get("test").await.is_some());
+        assert!(services.team_registry().get("main").await.is_some());
 
         let resp = handler
             .deregister_team(DeregisterTeamRequest {}, &ctx)
@@ -328,8 +332,8 @@ mod tests {
             .unwrap();
         assert!(resp.success);
 
-        assert!(services.team_registry.get("test").await.is_none());
-        assert!(services.team_registry.get("main").await.is_none());
+        assert!(services.team_registry().get("test").await.is_none());
+        assert!(services.team_registry().get("main").await.is_none());
     }
 
     #[tokio::test]
@@ -350,8 +354,8 @@ mod tests {
 
         handler.register_team(req, &ctx).await.unwrap();
 
-        assert!(services.team_registry.get("foo-claude").await.is_some());
-        assert!(services.team_registry.get("foo").await.is_some());
+        assert!(services.team_registry().get("foo-claude").await.is_some());
+        assert!(services.team_registry().get("foo").await.is_some());
     }
 
     #[tokio::test]
@@ -372,10 +376,14 @@ mod tests {
         handler.register_claude_id(req, &ctx).await.unwrap();
 
         assert!(services
-            .claude_session_registry
+            .claude_session_registry()
             .get("foo-claude")
             .await
             .is_some());
-        assert!(services.claude_session_registry.get("foo").await.is_some());
+        assert!(services
+            .claude_session_registry()
+            .get("foo")
+            .await
+            .is_some());
     }
 }

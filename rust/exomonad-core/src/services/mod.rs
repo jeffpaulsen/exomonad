@@ -96,21 +96,121 @@ pub trait HasTasksDir: Send + Sync {
 /// Shared services context, constructed once and threaded through the app.
 ///
 /// Contains all shared registries and infrastructure services. Handlers and
-/// services access what they need via Has* capability trait bounds.
+/// services access what they need via Has* capability trait bounds. Fields are
+/// private — all access goes through the capability traits.
 #[derive(Clone)]
 pub struct Services {
-    pub project_dir: PathBuf,
-    pub tasks_dir: PathBuf,
-    pub github_client: Option<Arc<GitHubClient>>,
-    pub event_log: Option<Arc<EventLog>>,
-    pub team_registry: Arc<TeamRegistry>,
-    pub acp_registry: Arc<AcpRegistry>,
-    pub supervisor_registry: Arc<SupervisorRegistry>,
-    pub claude_session_registry: Arc<ClaudeSessionRegistry>,
-    pub agent_resolver: Arc<AgentResolver>,
-    pub event_queue: Arc<EventQueue>,
-    pub mutex_registry: Arc<MutexRegistry>,
-    pub git_wt: Arc<GitWorktreeService>,
+    project_dir: PathBuf,
+    tasks_dir: PathBuf,
+    github_client: Option<Arc<GitHubClient>>,
+    event_log: Option<Arc<EventLog>>,
+    team_registry: Arc<TeamRegistry>,
+    acp_registry: Arc<AcpRegistry>,
+    supervisor_registry: Arc<SupervisorRegistry>,
+    claude_session_registry: Arc<ClaudeSessionRegistry>,
+    agent_resolver: Arc<AgentResolver>,
+    event_queue: Arc<EventQueue>,
+    mutex_registry: Arc<MutexRegistry>,
+    git_wt: Arc<GitWorktreeService>,
+}
+
+/// Builder for [`Services`]. All required fields are passed to `new()`; optional
+/// fields (`github_client`, `event_log`) have `_opt` variants for propagating an
+/// already-computed `Option`.
+pub struct ServicesBuilder {
+    project_dir: PathBuf,
+    tasks_dir: PathBuf,
+    git_wt: Arc<GitWorktreeService>,
+    github_client: Option<Arc<GitHubClient>>,
+    event_log: Option<Arc<EventLog>>,
+    team_registry: Arc<TeamRegistry>,
+    acp_registry: Arc<AcpRegistry>,
+    supervisor_registry: Arc<SupervisorRegistry>,
+    claude_session_registry: Arc<ClaudeSessionRegistry>,
+    agent_resolver: Arc<AgentResolver>,
+    event_queue: Arc<EventQueue>,
+    mutex_registry: Arc<MutexRegistry>,
+}
+
+impl ServicesBuilder {
+    pub fn new(project_dir: PathBuf, tasks_dir: PathBuf, git_wt: Arc<GitWorktreeService>) -> Self {
+        Self {
+            project_dir,
+            tasks_dir,
+            git_wt,
+            github_client: None,
+            event_log: None,
+            team_registry: Arc::new(TeamRegistry::new()),
+            acp_registry: Arc::new(AcpRegistry::new()),
+            supervisor_registry: Arc::new(SupervisorRegistry::new()),
+            claude_session_registry: Arc::new(ClaudeSessionRegistry::new()),
+            agent_resolver: Arc::new(AgentResolver::empty()),
+            event_queue: Arc::new(EventQueue::new()),
+            mutex_registry: Arc::new(MutexRegistry::new()),
+        }
+    }
+
+    pub fn github_client(mut self, c: Arc<GitHubClient>) -> Self {
+        self.github_client = Some(c);
+        self
+    }
+    pub fn github_client_opt(mut self, c: Option<Arc<GitHubClient>>) -> Self {
+        self.github_client = c;
+        self
+    }
+    pub fn event_log(mut self, l: Arc<EventLog>) -> Self {
+        self.event_log = Some(l);
+        self
+    }
+    pub fn event_log_opt(mut self, l: Option<Arc<EventLog>>) -> Self {
+        self.event_log = l;
+        self
+    }
+    pub fn team_registry(mut self, r: Arc<TeamRegistry>) -> Self {
+        self.team_registry = r;
+        self
+    }
+    pub fn acp_registry(mut self, r: Arc<AcpRegistry>) -> Self {
+        self.acp_registry = r;
+        self
+    }
+    pub fn supervisor_registry(mut self, r: Arc<SupervisorRegistry>) -> Self {
+        self.supervisor_registry = r;
+        self
+    }
+    pub fn claude_session_registry(mut self, r: Arc<ClaudeSessionRegistry>) -> Self {
+        self.claude_session_registry = r;
+        self
+    }
+    pub fn agent_resolver(mut self, r: Arc<AgentResolver>) -> Self {
+        self.agent_resolver = r;
+        self
+    }
+    pub fn event_queue(mut self, q: Arc<EventQueue>) -> Self {
+        self.event_queue = q;
+        self
+    }
+    pub fn mutex_registry(mut self, r: Arc<MutexRegistry>) -> Self {
+        self.mutex_registry = r;
+        self
+    }
+
+    pub fn build(self) -> Services {
+        Services {
+            project_dir: self.project_dir,
+            tasks_dir: self.tasks_dir,
+            github_client: self.github_client,
+            event_log: self.event_log,
+            team_registry: self.team_registry,
+            acp_registry: self.acp_registry,
+            supervisor_registry: self.supervisor_registry,
+            claude_session_registry: self.claude_session_registry,
+            agent_resolver: self.agent_resolver,
+            event_queue: self.event_queue,
+            mutex_registry: self.mutex_registry,
+            git_wt: self.git_wt,
+        }
+    }
 }
 
 impl HasTeamRegistry for Services {
@@ -178,20 +278,20 @@ impl HasTasksDir for Services {
 impl Services {
     /// Construct a Services with empty/default registries for testing.
     pub fn test() -> Self {
-        Self {
-            project_dir: PathBuf::from("."),
-            tasks_dir: PathBuf::from(".claude/tasks"),
-            github_client: None,
-            event_log: None,
-            team_registry: Arc::new(TeamRegistry::new()),
-            acp_registry: Arc::new(AcpRegistry::new()),
-            supervisor_registry: Arc::new(SupervisorRegistry::new()),
-            claude_session_registry: Arc::new(ClaudeSessionRegistry::new()),
-            agent_resolver: Arc::new(AgentResolver::empty()),
-            event_queue: Arc::new(EventQueue::new()),
-            mutex_registry: Arc::new(MutexRegistry::new()),
-            git_wt: Arc::new(GitWorktreeService::new(PathBuf::from("."))),
-        }
+        Self::test_with_project_dir(PathBuf::from("."))
+    }
+
+    /// Construct a test Services rooted at `project_dir`. The `git_wt` service
+    /// is constructed from the same directory.
+    pub fn test_with_project_dir(project_dir: PathBuf) -> Self {
+        let git_wt = Arc::new(GitWorktreeService::new(project_dir.clone()));
+        ServicesBuilder::new(project_dir, PathBuf::from(".claude/tasks"), git_wt).build()
+    }
+
+    /// Test-only setter for injecting a GitHubClient into an already-built
+    /// Services. Production code must go through [`ServicesBuilder`].
+    pub fn set_github_client(&mut self, c: Arc<GitHubClient>) {
+        self.github_client = Some(c);
     }
 }
 
