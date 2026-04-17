@@ -1,25 +1,23 @@
 use crate::domain::Address;
-use crate::services::tmux_events;
-use agent_client_protocol::{Agent, PromptRequest};
-use claude_teams_bridge as teams_mailbox;
-use claude_teams_bridge::TeamRegistry;
+use crate::services::delivery_channels::{execute_plan, PlanContext};
+use claude_teams_bridge::{TeamInfo, TeamRegistry};
 use exomonad_proto::effects::events::{event, AgentMessage, Event};
 use tracing::{debug, info, instrument, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Honest-typed delivery result.
+#[derive(Debug)]
 pub enum DeliveryResult {
-    Teams,
-    Acp,
-    Uds,
-    Tmux,
-    StaleRouting,
-    Failed,
-}
-
-impl DeliveryResult {
-    pub fn is_failure(self) -> bool {
-        matches!(self, DeliveryResult::StaleRouting | DeliveryResult::Failed)
-    }
+    /// Channel reported synchronous delivery.
+    Confirmed(DeliveryChannel),
+    /// Channel handed off to an async verifier. Callers that need certainty
+    /// can `.await` the receiver; fire-and-forget callers can treat this as
+    /// success-pending.
+    QueuedUnverified(
+        DeliveryChannel,
+        tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    ),
+    /// Plan exhausted or empty.
+    Failed(FailureReason),
 }
 
 /// Notification status for parent-facing messages.
@@ -74,26 +72,25 @@ pub fn format_parent_notification(
     }
 }
 
-/// Delivery method used for message routing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeliveryMethod {
-    TeamsInbox,
-    Acp,
-    Uds,
-    Tmux,
-}
-
 /// Outcome of a routed message delivery.
 #[derive(Debug)]
 pub enum DeliveryOutcome {
-    /// Successfully delivered to the resolved recipient.
+    /// Channel reported synchronous delivery to the intended recipient.
     Delivered {
-        method: DeliveryMethod,
+        channel: DeliveryChannel,
         recipient: crate::domain::AgentName,
     },
-    /// Original target could not be resolved; fell back to team lead.
+    /// Channel wrote but the recipient has not yet been verified to have read
+    /// (Teams inbox). Carries the verifier handle; callers that need certainty
+    /// may await it.
+    Queued {
+        channel: DeliveryChannel,
+        recipient: crate::domain::AgentName,
+        verify: tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    },
+    /// Target could not be resolved; fell back to team lead (successfully or not).
     FallbackToLead {
-        method: DeliveryMethod,
+        channel: DeliveryChannel,
         original: String,
         lead: crate::domain::AgentName,
     },
@@ -102,58 +99,170 @@ pub enum DeliveryOutcome {
 }
 
 impl DeliveryOutcome {
-    fn from_result(result: DeliveryResult, recipient: &str) -> Self {
-        let agent = crate::domain::AgentName::from(recipient);
-        match result {
-            DeliveryResult::Failed => DeliveryOutcome::Failed {
-                original: recipient.to_string(),
-                reason: "all delivery methods failed".to_string(),
-            },
-            DeliveryResult::StaleRouting => DeliveryOutcome::Failed {
-                original: recipient.to_string(),
-                reason: "stale routing.json (dead pane/window)".to_string(),
-            },
-            DeliveryResult::Teams => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::TeamsInbox,
-                recipient: agent,
-            },
-            DeliveryResult::Acp => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::Acp,
-                recipient: agent,
-            },
-            DeliveryResult::Uds => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::Uds,
-                recipient: agent,
-            },
-            DeliveryResult::Tmux => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::Tmux,
-                recipient: agent,
-            },
+    /// Whether delivery succeeded (including fallback and queuing).
+    pub fn is_success(&self) -> bool {
+        !matches!(self, DeliveryOutcome::Failed { .. })
+    }
+
+    /// The delivery channel used, if any.
+    pub fn channel_or_none(&self) -> Option<DeliveryChannel> {
+        match self {
+            DeliveryOutcome::Delivered { channel, .. }
+            | DeliveryOutcome::Queued { channel, .. }
+            | DeliveryOutcome::FallbackToLead { channel, .. } => Some(*channel),
+            DeliveryOutcome::Failed { .. } => None,
         }
     }
 
-    /// Whether delivery succeeded (including fallback).
-    pub fn is_success(&self) -> bool {
-        matches!(
-            self,
-            DeliveryOutcome::Delivered { .. } | DeliveryOutcome::FallbackToLead { .. }
-        )
-    }
-
-    /// The delivery method string for proto response.
-    pub fn method_string(&self) -> &str {
+    /// Map outcome to (success, delivery_method) for proto response.
+    pub fn outcome_to_response(&self) -> (bool, String) {
         match self {
-            DeliveryOutcome::Delivered { method, .. }
-            | DeliveryOutcome::FallbackToLead { method, .. } => match method {
-                DeliveryMethod::TeamsInbox => "teams_inbox",
-                DeliveryMethod::Acp => "acp",
-                DeliveryMethod::Uds => "unix_socket",
-                DeliveryMethod::Tmux => "tmux_stdin",
-            },
-            DeliveryOutcome::Failed { .. } => "failed",
+            DeliveryOutcome::Delivered { channel, .. } => (true, channel.as_str().to_string()),
+            DeliveryOutcome::Queued { channel, .. } => {
+                (true, format!("{}_queued", channel.as_str()))
+            }
+            DeliveryOutcome::FallbackToLead { channel, .. } => {
+                (true, format!("{}_lead_fallback", channel.as_str()))
+            }
+            DeliveryOutcome::Failed { .. } => (false, "failed".to_string()),
         }
     }
 }
+
+/// A single delivery transport. The delivery plan is a totally-ordered list of
+/// channels to attempt; the executor walks the list until one yields a non-Err
+/// outcome or the list is exhausted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DeliveryChannel {
+    Teams,
+    Acp,
+    Uds,
+    Tmux,
+}
+
+impl DeliveryChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeliveryChannel::Teams => "teams_inbox",
+            DeliveryChannel::Acp => "acp",
+            DeliveryChannel::Uds => "unix_socket",
+            DeliveryChannel::Tmux => "tmux_stdin",
+        }
+    }
+}
+
+/// Whether the recipient runs under exomonad (Tier 1: in-memory registered,
+/// has a worktree + `routing.json` + tmux window) or is a CC-native teammate
+/// discovered only via `~/.claude/teams/{team}/config.json` (Tier 2: no
+/// exomonad-side infrastructure, so tmux fallback is not available).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendType {
+    Exomonad,
+    CcNative,
+}
+
+/// Everything `delivery_plan` needs to decide how to reach a recipient. By
+/// design narrow — widening this struct needs strong justification (see
+/// anti-patterns in `plans/post-fixup-wave-followups.md`).
+#[derive(Debug, Clone, Copy)]
+pub struct RecipientMeta {
+    pub agent_type: crate::services::agent_control::AgentType,
+    pub backend_type: BackendType,
+}
+
+/// Outcome of the async Teams-inbox verifier. Only meaningful for
+/// `ChannelOutcome::Queued` / `DeliveryResult::QueuedUnverified`.
+#[derive(Debug)]
+pub enum VerifyOutcome {
+    /// Recipient's InboxPoller read the message within the verification window.
+    Confirmed,
+    /// Recipient did not read; verifier successfully injected via tmux.
+    ///
+    /// NOTE: Not implemented in the refactored `try_teams_channel` yet; only
+    /// produced by the legacy `deliver_to_agent` path.
+    FellBackToTmux,
+    /// Recipient did not read and tmux fallback was either unavailable
+    /// (Tier 2 / CC-native) or failed.
+    VerificationFailed(String),
+}
+
+/// Honest outcome of a single channel attempt.
+#[derive(Debug)]
+pub enum ChannelOutcome {
+    /// Synchronous proof of receipt (ACP ack, UDS 2xx, tmux inject success).
+    Confirmed,
+    /// Handed off to an async verifier (Teams inbox). The receiver fires with
+    /// a `VerifyOutcome` when the verifier completes (up to ~30s).
+    Queued(tokio::sync::oneshot::Receiver<VerifyOutcome>),
+    /// Channel attempt failed; executor should continue to the next channel.
+    Failed(String),
+}
+
+/// Reasons the full plan failed to deliver.
+#[derive(Debug)]
+pub enum FailureReason {
+    /// Every channel in the plan returned `Failed`.
+    AllChannelsExhausted,
+    /// `delivery_plan` produced an empty plan for this recipient (e.g.
+    /// `AgentType::Process`, or `Gemini` + `CcNative`).
+    Undeliverable(RecipientMeta),
+    /// `routing.json` exists but all targets (pane/window) are dead.
+    StaleRouting,
+}
+
+/// Pure policy: which channels should be attempted, in what order, for this
+/// recipient. The single source of truth for channel selection — no caller
+/// may branch on agent type outside this function.
+pub fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
+    use crate::services::agent_control::AgentType::*;
+    use BackendType::*;
+    use DeliveryChannel::*;
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude, Exomonad) => vec![Teams, Tmux],
+        (Claude, CcNative) => vec![Teams],
+        (Gemini, Exomonad) => vec![Acp, Tmux],
+        (Gemini, CcNative) => vec![],
+        (Shoal, Exomonad) => vec![Uds, Tmux],
+        (Shoal, CcNative) => vec![],
+        (Process, _) => vec![],
+    }
+}
+
+/// Inverse view of the policy: which channels this recipient is *capable* of
+/// receiving on. The executor's invariant is
+/// `delivery_plan(m) ⊆ channels_recipient_can_receive(m)`; the property test
+/// in leaf `delivery-plan-pure` enforces it.
+pub fn channels_recipient_can_receive(
+    recipient: &RecipientMeta,
+) -> std::collections::BTreeSet<DeliveryChannel> {
+    use crate::services::agent_control::AgentType::*;
+    use BackendType::*;
+    use DeliveryChannel::*;
+    let mut set = std::collections::BTreeSet::new();
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude, Exomonad) => {
+            set.insert(Teams);
+            set.insert(Tmux);
+        }
+        (Claude, CcNative) => {
+            set.insert(Teams);
+        }
+        (Gemini, Exomonad) => {
+            set.insert(Acp);
+            set.insert(Tmux);
+        }
+        (Gemini, CcNative) => {}
+        (Shoal, Exomonad) => {
+            set.insert(Uds);
+            set.insert(Tmux);
+        }
+        (Shoal, CcNative) => {}
+        (Process, _) => {}
+    }
+    set
+}
+
+// ---------------------------------------------------------------------------
 
 /// Route a message to a typed Address.
 ///
@@ -177,7 +286,7 @@ pub async fn route_message(
             let tab_name = resolve_tab_name_for_agent(name, Some(ctx.agent_resolver()));
             let agent_key = name.as_str();
             let result = deliver_to_agent(ctx, agent_key, &tab_name, from, content, summary).await;
-            DeliveryOutcome::from_result(result, agent_key)
+            map_result_to_outcome(result, name.clone(), agent_key)
         }
         Address::Team { team, member } => {
             if let Some(member_name) = member {
@@ -186,7 +295,7 @@ pub async fn route_message(
                 let agent_key = member_name.as_str();
                 let result =
                     deliver_to_agent(ctx, agent_key, &tab_name, from, content, summary).await;
-                DeliveryOutcome::from_result(result, agent_key)
+                map_result_to_outcome(result, member_name.clone(), agent_key)
             } else {
                 // Team lead resolution: find who owns this team
                 resolve_and_deliver_to_lead(ctx, team.as_str(), from, content, summary).await
@@ -195,8 +304,27 @@ pub async fn route_message(
         Address::Supervisor => {
             // Supervisor resolves to "root" by default (the root TL)
             let result = deliver_to_agent(ctx, "root", "TL", from, content, summary).await;
-            DeliveryOutcome::from_result(result, "root")
+            map_result_to_outcome(result, crate::domain::AgentName::from("root"), "root")
         }
+    }
+}
+
+fn map_result_to_outcome(
+    result: DeliveryResult,
+    recipient: crate::domain::AgentName,
+    original: &str,
+) -> DeliveryOutcome {
+    match result {
+        DeliveryResult::Confirmed(channel) => DeliveryOutcome::Delivered { channel, recipient },
+        DeliveryResult::QueuedUnverified(channel, verify) => DeliveryOutcome::Queued {
+            channel,
+            recipient,
+            verify,
+        },
+        DeliveryResult::Failed(reason) => DeliveryOutcome::Failed {
+            original: original.to_string(),
+            reason: format!("{:?}", reason),
+        },
     }
 }
 
@@ -232,28 +360,29 @@ async fn resolve_and_deliver_to_lead(
     let tab_name = resolve_tab_name_for_agent(&lead_agent, Some(ctx.agent_resolver()));
     let result = deliver_to_agent(ctx, &lead_key, &tab_name, from, content, summary).await;
 
-    if result.is_failure() {
-        DeliveryOutcome::Failed {
-            original,
-            reason: format!("delivery to resolved lead '{}' failed ({:?})", lead_key, result),
-        }
-    } else {
-        DeliveryOutcome::FallbackToLead {
-            method: delivery_method_from_result(result),
-            original,
-            lead: crate::domain::AgentName::from(lead_key.as_str()),
-        }
-    }
-}
-
-fn delivery_method_from_result(result: DeliveryResult) -> DeliveryMethod {
     match result {
-        DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
-        DeliveryResult::Acp => DeliveryMethod::Acp,
-        DeliveryResult::Uds => DeliveryMethod::Uds,
-        DeliveryResult::Tmux | DeliveryResult::Failed | DeliveryResult::StaleRouting => {
-            DeliveryMethod::Tmux
+        DeliveryResult::Confirmed(channel) => DeliveryOutcome::FallbackToLead {
+            channel,
+            original,
+            lead: lead_agent,
+        },
+        DeliveryResult::QueuedUnverified(channel, _rx) => {
+            // NOTE: We drop the receiver for fallback-to-lead for now to keep
+            // DeliveryOutcome simple. Callers of route_message typically don't
+            // await verification for fallbacks.
+            DeliveryOutcome::FallbackToLead {
+                channel,
+                original,
+                lead: lead_agent,
+            }
         }
+        DeliveryResult::Failed(reason) => DeliveryOutcome::Failed {
+            original,
+            reason: format!(
+                "delivery to resolved lead '{}' failed ({:?})",
+                lead_key, reason
+            ),
+        },
     }
 }
 
@@ -285,16 +414,6 @@ pub fn resolve_tab_name_for_agent(
 }
 
 /// Notify a parent agent. Single codepath for all parent notifications.
-///
-/// Pipeline: event log → EventQueue → format `[from: id]`/`[FAILED: id]` → deliver_to_agent.
-/// Used by both `EventHandler::notify_parent` (agent-initiated) and the poller's
-/// `NotifyParentAction` (system-initiated via event handlers).
-///
-/// All messages are prefixed with `[from: id]` (or `[FAILED: id]` for failures).
-/// Event handler messages include their own structural tags (e.g. `[PR READY]`)
-/// inside the message body, so the TL sees: `[from: leaf-id] [PR READY] PR #5...`
-///
-/// For peer-to-peer messaging, use `deliver_to_agent()` directly instead.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
@@ -367,7 +486,7 @@ pub async fn notify_parent_delivery(
 
 /// Deliver a notification via HTTP POST over a Unix domain socket.
 /// Fire-and-forget with 5s timeout.
-async fn deliver_via_uds(
+pub(super) async fn deliver_via_uds(
     socket_path: &std::path::Path,
     from: &str,
     message: &str,
@@ -438,10 +557,10 @@ async fn deliver_via_uds(
 
 /// Deliver a message to an agent.
 ///
-/// Tries Teams inbox delivery if a registry and agent key are provided.
-/// Attempts ACP prompt delivery if a registry is provided and agent is registered.
-/// Attempts HTTP-over-UDS delivery for custom binary agents (e.g., shoal-agent).
-/// Falls back to tmux input injection if other delivery methods fail or are not available.
+/// Thin wrapper over `delivery_plan` + `execute_plan`. Builds a
+/// `RecipientMeta` from the TeamRegistry lookup (agent_type + tier), resolves
+/// the tmux target via `routing.json` (with stale-entry pruning), and runs
+/// the resulting capability-driven plan.
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
     ctx: &(impl super::HasTeamRegistry
@@ -454,247 +573,127 @@ pub async fn deliver_to_agent(
     message: &str,
     summary: &str,
 ) -> DeliveryResult {
-    let team_registry = ctx.team_registry();
-    let acp_registry = ctx.acp_registry();
+    // 1. Classify the recipient.
+    let (team_info_opt, is_in_memory) = resolve_team_info(ctx, agent_key, from).await;
+    let recipient_meta = recipient_meta_from_team_info(team_info_opt.as_ref(), is_in_memory);
+
+    // 2. Pre-resolve the tmux target via routing.json.
     let project_dir = ctx.project_dir();
     let tmux_ipc = ctx.tmux_ipc();
+    let routing_res = resolve_routing(agent_key, project_dir, tmux_ipc).await;
+    let (resolved_tmux_target, tmux_working_dir) = match routing_res {
+        RoutingResolution::Alive {
+            target,
+            working_dir,
+        } => (target, working_dir),
+        RoutingResolution::AllStale => return DeliveryResult::Failed(FailureReason::StaleRouting),
+        RoutingResolution::NoRouting => (
+            tmux_target.to_string(),
+            fallback_tmux_working_dir(tmux_target, project_dir),
+        ),
+    };
 
-    // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
-    // Single lock acquisition instead of two separate get() calls.
-    let (sender_info, recipient_info) = team_registry.get_pair(from.as_str(), agent_key).await;
+    // 3. Build the plan + per-channel context, then execute.
+    let plan = delivery_plan(&recipient_meta);
+    let uds_socket_path = project_dir.join(format!(".exo/agents/{}/notify.sock", agent_key));
+    let uds_socket_opt: Option<&std::path::Path> = if uds_socket_path.exists() {
+        Some(uds_socket_path.as_path())
+    } else {
+        None
+    };
+    let pctx = PlanContext {
+        agent_key,
+        tmux_target: &resolved_tmux_target,
+        from,
+        message,
+        summary,
+        team_info: team_info_opt.as_ref(),
+        uds_socket: uds_socket_opt,
+        tmux_working_dir: &tmux_working_dir,
+    };
+    let result = execute_plan(plan, ctx, &pctx).await;
+
+    match &result {
+        DeliveryResult::Confirmed(channel) => {
+            tracing::Span::current().record("delivery_method", channel.as_str());
+        }
+        DeliveryResult::QueuedUnverified(channel, _) => {
+            tracing::Span::current().record("delivery_method", channel.as_str());
+        }
+        DeliveryResult::Failed(reason) => {
+            warn!(agent = %agent_key, ?reason, "execute_plan exhausted without delivery");
+        }
+    }
+
+    result
+}
+
+/// Best-effort `TeamInfo` lookup: Tier 1 (in-memory) then Tier 2 (config.json
+/// scan scoped by the sender's team). Returns `(team_info, is_tier_1)`.
+async fn resolve_team_info(
+    ctx: &impl super::HasTeamRegistry,
+    agent_key: &str,
+    from: &crate::domain::AgentName,
+) -> (Option<TeamInfo>, bool) {
+    let (sender_info, recipient_info) =
+        ctx.team_registry().get_pair(from.as_str(), agent_key).await;
     let sender_team = sender_info.map(|info| info.team_name);
-    // Track whether this is a Tier 1 (in-memory) resolution — CC-native agents
-    // (Tier 2, config.json) don't have worktrees or routing.json, so the
-    // verifier's tmux fallback should be skipped for them.
     let is_in_memory = recipient_info.is_some();
-    // Use in-memory result directly, or fall back to Tier 2 (config.json scan)
     let resolved = recipient_info.or_else(|| {
         sender_team
             .as_deref()
             .and_then(|team| TeamRegistry::resolve_from_config(team, agent_key))
     });
-    if let Some(team_info) = resolved {
-        // Retry inbox writes up to 3 times before falling back
-        let team_name_ref = &team_info.team_name;
-        let inbox_name_ref = &team_info.inbox_name;
-        let inbox_policy = super::resilience::RetryPolicy::new(
-            3,
-            super::resilience::Backoff::Fixed(std::time::Duration::from_millis(100)),
-        );
-        let teams_result = super::resilience::retry(&inbox_policy, || async {
-            teams_mailbox::write_to_inbox(
-                team_name_ref,
-                inbox_name_ref,
-                from.as_str(),
-                message,
-                summary,
-            )
-            .map_err(|e| anyhow::anyhow!("{}", e))
-        })
-        .await;
-        let teams_result = match teams_result {
-            Ok(timestamp) => Some(timestamp),
-            Err(e) => {
-                warn!(
-                    agent = %agent_key,
-                    error = %e,
-                    "Teams inbox write failed after 3 attempts, falling back to ACP/tmux"
-                );
-                tracing::info!(
-                    otel.name = "message.delivery",
-                    agent_id = %from,
-                    recipient = %agent_key,
-                    method = "teams_inbox",
-                    outcome = "failed",
-                    detail = %e,
-                    "[event] message.delivery"
-                );
-                None
-            }
-        };
+    (resolved, is_in_memory)
+}
 
-        if let Some(timestamp) = teams_result {
-            tracing::Span::current().record("delivery_method", "teams");
-            info!(
-                agent = %agent_key,
-                team = %team_info.team_name,
-                inbox = %team_info.inbox_name,
-                timestamp = %timestamp,
-                "Wrote message to Teams inbox, spawning delivery verifier (30s)"
-            );
-
-            tracing::info!(
-                otel.name = "message.delivery",
-                agent_id = %from,
-                recipient = %agent_key,
-                method = "teams_inbox",
-                outcome = "success",
-                detail = format!("{}/{}", team_info.team_name, team_info.inbox_name),
-                "[event] message.delivery"
-            );
-
-            // Spawn background task to verify CC's InboxPoller read the message.
-            // If not read within 30s, fall back to tmux STDIN injection.
-            // For Tier 2 (CC-native) recipients, skip tmux fallback — they don't
-            // have exomonad worktrees or routing.json. CC's InboxPoller owns delivery.
-            let team_name = team_info.team_name.clone();
-            let inbox_name = team_info.inbox_name.clone();
-            let agent = agent_key.to_string();
-            let target = tmux_target.to_string();
-            let msg = message.to_string();
-            let has_tmux_fallback = is_in_memory;
-            let worktree = if agent_key.contains('.') {
-                crate::services::resolve_working_dir(agent_key)
-            } else if tmux_target == "TL" {
-                std::path::PathBuf::from(".")
-            } else {
-                crate::services::resolve_worktree_from_tab(tmux_target)
-            };
-            let pd = project_dir.join(worktree);
-            let tmux_ipc = tmux_ipc.clone();
-            tokio::spawn(async move {
-                let verify_policy = crate::services::resilience::RetryPolicy::new(
-                    3,
-                    crate::services::resilience::Backoff::Fixed(std::time::Duration::from_secs(10)),
-                );
-                let verified = crate::services::resilience::retry(&verify_policy, || {
-                    let is_read =
-                        teams_mailbox::is_message_read(&team_name, &inbox_name, &timestamp);
-                    info!(
-                        agent = %agent,
-                        team = %team_name,
-                        inbox = %inbox_name,
-                        timestamp = %timestamp,
-                        is_read,
-                        "Delivery verifier poll"
-                    );
-                    async move {
-                        if is_read {
-                            Ok(())
-                        } else {
-                            anyhow::bail!("message not yet read")
-                        }
-                    }
-                })
-                .await;
-                if verified.is_ok() {
-                    return;
-                }
-                if !has_tmux_fallback {
-                    warn!(
-                        agent = %agent,
-                        team = %team_name,
-                        "Teams inbox message not read after 30s (Tier 2 recipient, no tmux fallback)"
-                    );
-                    return;
-                }
-                warn!(
-                    agent = %agent,
-                    team = %team_name,
-                    target = %target,
-                    "Teams inbox message not read after 30s, falling back to tmux injection"
-                );
-                if let Err(e) = tmux_events::inject_input(&tmux_ipc, &target, &msg, &pd).await {
-                    warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
-                }
-            });
-            return DeliveryResult::Teams;
-        }
+fn recipient_meta_from_team_info(info: Option<&TeamInfo>, is_in_memory: bool) -> RecipientMeta {
+    let agent_type = info
+        .map(|i| parse_agent_type_str(&i.agent_type))
+        .unwrap_or(crate::services::agent_control::AgentType::Claude);
+    let backend_type = if is_in_memory {
+        BackendType::Exomonad
+    } else if info.is_some() {
+        BackendType::CcNative
+    } else {
+        BackendType::Exomonad
+    };
+    RecipientMeta {
+        agent_type,
+        backend_type,
     }
+}
 
-    if let Some(conn) = acp_registry.get(agent_key).await {
-        match conn
-            .conn
-            .prompt(PromptRequest::new(
-                conn.session_id.clone(),
-                // ACP prompt content can be multiple messages, but we deliver one-at-a-time here.
-                vec![message.into()],
-            ))
-            .await
-        {
-            Ok(_) => {
-                tracing::Span::current().record("delivery_method", "acp");
-                info!(agent = %agent_key, "Delivered message via ACP prompt");
-                tracing::info!(
-                    otel.name = "message.delivery",
-                    agent_id = %from,
-                    recipient = %agent_key,
-                    method = "acp",
-                    outcome = "success",
-                    detail = %conn.session_id,
-                    "[event] message.delivery"
-                );
-                return DeliveryResult::Acp;
-            }
-            Err(e) => {
-                warn!(
-                    agent = %agent_key,
-                    error = ?e,
-                    "ACP prompt failed, falling back to tmux"
-                );
-                // Purge on connection-level errors. ACP's Error doesn't expose ErrorKind
-                // directly, but we can check if it's an internal error from the server
-                // shutting down or a broken transport.
-                if is_acp_connection_error(&e) {
-                    acp_registry.remove(agent_key).await;
-                }
-                tracing::info!(
-                    otel.name = "message.delivery",
-                    agent_id = %from,
-                    recipient = %agent_key,
-                    method = "acp",
-                    outcome = "failed",
-                    detail = ?e,
-                    "[event] message.delivery"
-                );
-            }
-        }
+fn parse_agent_type_str(s: &str) -> crate::services::agent_control::AgentType {
+    use crate::services::agent_control::AgentType;
+    match s {
+        "claude" => AgentType::Claude,
+        "shoal" => AgentType::Shoal,
+        "process" => AgentType::Process,
+        _ => AgentType::Gemini,
     }
+}
 
-    // Try HTTP-over-UDS delivery (for custom binary agents like shoal-agent)
-    let socket_path = project_dir.join(format!(".exo/agents/{}/notify.sock", agent_key));
-    if socket_path.exists() {
-        match deliver_via_uds(&socket_path, from.as_str(), message, summary).await {
-            Ok(()) => {
-                tracing::Span::current().record("delivery_method", "uds");
-                info!(agent = %agent_key, socket = %socket_path.display(), "Delivered message via Unix socket");
-                tracing::info!(
-                    otel.name = "message.delivery",
-                    agent_id = %from,
-                    recipient = %agent_key,
-                    method = "unix_socket",
-                    outcome = "success",
-                    detail = %socket_path.to_string_lossy(),
-                    "[event] message.delivery"
-                );
-                return DeliveryResult::Uds;
-            }
-            Err(e) => {
-                warn!(agent = %agent_key, error = %e, "UDS delivery failed, falling back to tmux");
-                tracing::info!(
-                    otel.name = "message.delivery",
-                    agent_id = %from,
-                    recipient = %agent_key,
-                    method = "unix_socket",
-                    outcome = "failed",
-                    detail = %e,
-                    "[event] message.delivery"
-                );
-            }
-        }
-    }
+enum RoutingResolution {
+    Alive {
+        target: String,
+        working_dir: std::path::PathBuf,
+    },
+    AllStale,
+    NoRouting,
+}
 
-    // routing.json records tmux identifiers at spawn time: pane_id (%N) for
-    // workers, window_id (@N) for subtrees/leaves. Use slug (last dot-segment)
-    // since agent_control writes routing under the slug, not the full branch name.
-    // Try direct agent_key path first (for peer messaging where key is already
-    // the directory name), then slug with all agent type suffixes.
+async fn resolve_routing(
+    agent_key: &str,
+    project_dir: &std::path::Path,
+    tmux_ipc: &super::tmux_ipc::TmuxIpc,
+) -> RoutingResolution {
     let slug = agent_key
         .rsplit_once('.')
         .map(|(_, s)| s)
         .unwrap_or(agent_key);
     let agents_dir = project_dir.join(".exo/agents");
-    let routing_candidates = std::iter::once(agent_key.to_string()).chain(
+    let candidates = std::iter::once(agent_key.to_string()).chain(
         ["gemini", "claude", "shoal"].iter().flat_map(|suffix| {
             [
                 format!("{}-{}", slug, suffix),
@@ -703,128 +702,78 @@ pub async fn deliver_to_agent(
         }),
     );
 
-    let mut routing_target = None;
-    let mut routing_parent_tab = None;
-    let mut matched_dir_name = None;
-    let mut stale_candidates = Vec::new();
-
-    for dir_name in routing_candidates {
+    let mut stale = Vec::new();
+    for dir_name in candidates {
         let path = agents_dir.join(&dir_name).join("routing.json");
         debug!(candidate = %dir_name, path = %path.display(), "Checking routing candidate");
-        if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            debug!(path = %path.display(), "Found routing.json");
-            if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
-                // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
-                let target = routing["pane_id"]
-                    .as_str()
-                    .or_else(|| routing["window_id"].as_str())
-                    .or_else(|| routing["parent_tab"].as_str())
-                    .map(|s| s.to_string());
+        let Ok(content) = tokio::fs::read_to_string(&path).await else {
+            continue;
+        };
+        let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let Some(target) = routing["pane_id"]
+            .as_str()
+            .or_else(|| routing["window_id"].as_str())
+            .or_else(|| routing["parent_tab"].as_str())
+            .map(|s| s.to_string())
+        else {
+            continue;
+        };
 
-                if let Some(t) = target {
-                    // Liveness check: verify tmux target still exists before attempting injection
-                    if tmux_ipc.target_alive(&t).await {
-                        debug!(target = %t, "Routing target is alive");
-                        routing_target = Some(t);
-                        routing_parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
-                        matched_dir_name = Some(dir_name.clone());
-                        break;
-                    } else {
-                        debug!(target = %t, "Routing target is dead");
-                        warn!(
-                            agent = %agent_key,
-                            target = %t,
-                            dir = %dir_name,
-                            "Routing target is dead, skipping candidate"
-                        );
-                        stale_candidates.push(dir_name.clone());
-                    }
-                }
-            }
+        if tmux_ipc.target_alive(&target).await {
+            let parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
+            let working_dir =
+                routing_working_dir(&dir_name, parent_tab.as_deref(), agent_key, project_dir);
+            return RoutingResolution::Alive {
+                target,
+                working_dir,
+            };
         }
-    }
-
-    if let Some(target) = routing_target {
-        tracing::Span::current().record("delivery_method", "tmux");
-        info!(
+        warn!(
             agent = %agent_key,
             target = %target,
-            chars = message.len(),
-            "Injecting message via routing.json"
+            dir = %dir_name,
+            "Routing target is dead, skipping candidate"
         );
-        let worktree = if let Some(ref parent_tab) = routing_parent_tab {
-            crate::services::resolve_worktree_from_tab(parent_tab)
-        } else if let Some(ref dir_name) = matched_dir_name {
-            // Check if a worktree exists with this name (subtree agent)
-            let wt_path = project_dir.join(".exo/worktrees").join(dir_name);
-            if wt_path.exists() {
-                std::path::PathBuf::from(format!(".exo/worktrees/{}/", dir_name))
-            } else {
-                crate::services::resolve_working_dir(agent_key)
-            }
-        } else {
-            crate::services::resolve_working_dir(agent_key)
-        };
-        let effective_pd = project_dir.join(worktree);
-        let outcome =
-            match tmux_events::inject_input(tmux_ipc, &target, message, &effective_pd).await {
-                Ok(()) => "success",
-                Err(e) => {
-                    warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
-                    "failed"
-                }
-            };
-        tracing::info!(
-            otel.name = "message.delivery",
-            agent_id = %from,
-            recipient = %agent_key,
-            method = "tmux_routing",
-            outcome = outcome,
-            detail = %target,
-            "[event] message.delivery"
-        );
-        return DeliveryResult::Tmux;
+        stale.push(dir_name);
     }
 
-    // All routing candidates proved dead — prune the stale JSON files
-    if !stale_candidates.is_empty() {
-        for dir_name in stale_candidates {
-            prune_stale_routing(project_dir, &dir_name).await;
-        }
-        return DeliveryResult::StaleRouting;
+    if stale.is_empty() {
+        return RoutingResolution::NoRouting;
     }
+    for dir_name in stale {
+        prune_stale_routing(project_dir, &dir_name).await;
+    }
+    RoutingResolution::AllStale
+}
 
-    tracing::Span::current().record("delivery_method", "tmux");
-    debug!(
-        target = %tmux_target,
-        agent = %agent_key,
-        chars = message.len(),
-        "Injecting message into agent pane via tmux"
-    );
-    let worktree = if tmux_target == "TL" {
+fn routing_working_dir(
+    dir_name: &str,
+    parent_tab: Option<&str>,
+    agent_key: &str,
+    project_dir: &std::path::Path,
+) -> std::path::PathBuf {
+    let relative = if let Some(parent_tab) = parent_tab {
+        crate::services::resolve_worktree_from_tab(parent_tab)
+    } else if project_dir.join(".exo/worktrees").join(dir_name).exists() {
+        std::path::PathBuf::from(format!(".exo/worktrees/{}/", dir_name))
+    } else {
+        crate::services::resolve_working_dir(agent_key)
+    };
+    project_dir.join(relative)
+}
+
+fn fallback_tmux_working_dir(
+    tmux_target: &str,
+    project_dir: &std::path::Path,
+) -> std::path::PathBuf {
+    let relative = if tmux_target == "TL" {
         std::path::PathBuf::from(".")
     } else {
         crate::services::resolve_worktree_from_tab(tmux_target)
     };
-    let effective_pd = project_dir.join(worktree);
-    let outcome =
-        match tmux_events::inject_input(tmux_ipc, tmux_target, message, &effective_pd).await {
-            Ok(()) => "success",
-            Err(e) => {
-                warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
-                "failed"
-            }
-        };
-    tracing::info!(
-        otel.name = "message.delivery",
-        agent_id = %from,
-        recipient = %agent_key,
-        method = "tmux_fallback",
-        outcome = outcome,
-        detail = %tmux_target,
-        "[event] message.delivery"
-    );
-    DeliveryResult::Tmux
+    project_dir.join(relative)
 }
 
 /// Prune a stale routing.json file for an agent.
@@ -848,7 +797,7 @@ async fn prune_stale_routing(project_dir: &std::path::Path, agent_dir_name: &str
 
 /// Helper to detect if an ACP error indicates a broken connection that should
 /// be purged from the registry.
-fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
+pub(super) fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
     // ACP's Error uses JSON-RPC codes. InternalError is -32603.
     // The RPC layer specifically uses "server shut down unexpectedly" for oneshot
     // receiver failures (broken pipes/task crashes).
@@ -908,21 +857,27 @@ mod tests {
 
     #[test]
     fn test_delivery_result_variants_distinct() {
-        assert_ne!(DeliveryResult::Teams, DeliveryResult::Tmux);
-        assert_ne!(DeliveryResult::Teams, DeliveryResult::Failed);
-        assert_ne!(DeliveryResult::Tmux, DeliveryResult::Failed);
+        // Use matches! since they no longer derive PartialEq easily due to oneshot::Receiver
+        assert!(matches!(
+            DeliveryResult::Confirmed(DeliveryChannel::Teams),
+            DeliveryResult::Confirmed(DeliveryChannel::Teams)
+        ));
     }
 
     #[tokio::test]
-    async fn test_deliver_no_registry_returns_tmux() {
+    async fn test_deliver_no_registry_no_tmux_target_returns_failed() {
         if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
-            eprintln!("skipping test_deliver_no_registry_returns_tmux: tmux not available");
+            eprintln!("skipping test_deliver_no_registry_no_tmux_target_returns_failed: tmux not available");
             return;
         }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");
         let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
+        // "tab-1" does not exist in the isolated tmux session — with honest-typed
+        // delivery, tmux injection now reports `Failed` instead of falsely
+        // claiming success (the legacy `DeliveryResult::Tmux`-on-error behavior
+        // was the exact silent dead-letter this refactor eliminates).
         let result = deliver_to_agent(
             &services,
             "agent-1",
@@ -932,9 +887,10 @@ mod tests {
             "summary",
         )
         .await;
-        // In isolated tmux, tab-1 doesn't exist, so it should still return Tmux
-        // (the delivery code returns Tmux regardless of inject_input success, it just warns on Err)
-        assert_eq!(result, DeliveryResult::Tmux);
+        assert!(matches!(
+            result,
+            DeliveryResult::Failed(FailureReason::AllChannelsExhausted)
+        ));
     }
 
     #[tokio::test]
@@ -951,9 +907,10 @@ mod tests {
         let address = Address::Agent(AgentName::from("unknown"));
         let outcome = route_message(&services, &address, &from, "content", "summary").await;
 
-        // Currently deliver_to_agent falls back to Tmux if everything else fails.
-        // The test verifies the branch runs without panic.
-        assert!(outcome.is_success());
+        // Unknown agent + no live tmux target → honest `Failed` outcome.
+        // Under legacy semantics this claimed success; the refactor makes the
+        // failure structurally visible.
+        assert!(matches!(outcome, DeliveryOutcome::Failed { .. }));
     }
 
     #[tokio::test]
@@ -974,7 +931,8 @@ mod tests {
             member: Some(AgentName::from("member-1")),
         };
         let outcome = route_message(&services, &address, &from, "content", "summary").await;
-        assert!(outcome.is_success());
+        // No live tmux target for "member-1" → honest `Failed`.
+        assert!(matches!(outcome, DeliveryOutcome::Failed { .. }));
     }
 
     #[tokio::test]
@@ -996,22 +954,34 @@ mod tests {
         };
         let outcome = route_message(&services, &address, &from, "content", "summary").await;
 
-        // Should resolve to "root" by default and return FallbackToLead or Delivered(Tmux)
+        // Resolves to "root" as the lead, but no live tmux target → `Failed`.
+        // The failure reason still carries the resolved lead name, proving the
+        // routing logic found the right recipient even though delivery itself failed.
         match outcome {
+            DeliveryOutcome::Failed { reason, .. } => {
+                assert!(
+                    reason.contains("root"),
+                    "reason should mention 'root', got: {reason}"
+                );
+            }
             DeliveryOutcome::FallbackToLead { lead, .. } => {
                 assert_eq!(lead.as_str(), "root");
             }
             DeliveryOutcome::Delivered { recipient, .. } => {
                 assert_eq!(recipient.as_str(), "root");
             }
-            _ => panic!("Expected fallback to root, got {:?}", outcome),
+            DeliveryOutcome::Queued { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "root");
+            }
         }
     }
 
     #[tokio::test]
-    async fn test_deliver_to_agent_no_routing() {
+    async fn test_deliver_to_agent_no_routing_dead_target_fails() {
         if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
-            eprintln!("skipping test_deliver_to_agent_no_routing: tmux not available");
+            eprintln!(
+                "skipping test_deliver_to_agent_no_routing_dead_target_fails: tmux not available"
+            );
             return;
         }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
@@ -1027,8 +997,12 @@ mod tests {
             "sum",
         )
         .await;
-        // Falls back to Tmux
-        assert_eq!(result, DeliveryResult::Tmux);
+        // Target "target" does not exist in the isolated tmux session. Honest
+        // semantics: delivery fails.
+        assert!(matches!(
+            result,
+            DeliveryResult::Failed(FailureReason::AllChannelsExhausted)
+        ));
     }
 
     #[tokio::test]
@@ -1075,19 +1049,30 @@ mod tests {
             .expect("tmux unavailable");
         let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let from = AgentName::from("sender");
-        // No config.json and empty TeamRegistry should fallback to root
+        // No config.json and empty TeamRegistry should fallback to root.
+        // With honest-typed delivery, the TL tab "TL" doesn't exist in isolated
+        // tmux so delivery fails — but the failure reason names the resolved
+        // lead, proving the fallback logic ran correctly.
         let outcome =
             resolve_and_deliver_to_lead(&services, "unknown-team", &from, "content", "summary")
                 .await;
 
         match outcome {
+            DeliveryOutcome::Failed { reason, .. } => {
+                assert!(
+                    reason.contains("root"),
+                    "reason should mention 'root', got: {reason}"
+                );
+            }
             DeliveryOutcome::FallbackToLead { lead, .. } => {
                 assert_eq!(lead.as_str(), "root");
             }
             DeliveryOutcome::Delivered { recipient, .. } => {
                 assert_eq!(recipient.as_str(), "root");
             }
-            _ => panic!("Expected fallback to root, got {:?}", outcome),
+            DeliveryOutcome::Queued { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "root");
+            }
         }
     }
 
@@ -1155,16 +1140,21 @@ mod tests {
             resolve_and_deliver_to_lead(&services, team_name, &from, "content", "summary").await;
 
         match outcome {
+            DeliveryOutcome::Failed { reason, .. } => {
+                assert!(
+                    reason.contains("resolved-lead"),
+                    "reason should mention 'resolved-lead', got: {reason}"
+                );
+            }
             DeliveryOutcome::FallbackToLead { lead, .. } => {
                 assert_eq!(lead.as_str(), "resolved-lead");
             }
             DeliveryOutcome::Delivered { recipient, .. } => {
                 assert_eq!(recipient.as_str(), "resolved-lead");
             }
-            _ => panic!(
-                "Expected FallbackToLead or Delivered to resolved-lead, got {:?}",
-                outcome
-            ),
+            DeliveryOutcome::Queued { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "resolved-lead");
+            }
         }
     }
 
@@ -1218,7 +1208,10 @@ mod tests {
         .await;
 
         // Should use routing and return Tmux
-        assert_eq!(result, DeliveryResult::Tmux);
+        assert!(matches!(
+            result,
+            DeliveryResult::Confirmed(DeliveryChannel::Tmux)
+        ));
         // routing.json should still exist
         assert!(agent_dir.join("routing.json").exists());
     }
@@ -1267,7 +1260,10 @@ mod tests {
         .await;
 
         // Should return StaleRouting and prune the file
-        assert_eq!(result, DeliveryResult::StaleRouting);
+        assert!(matches!(
+            result,
+            DeliveryResult::Failed(FailureReason::StaleRouting)
+        ));
         assert!(!agent_dir.join("routing.json").exists());
     }
 
@@ -1335,8 +1331,115 @@ mod tests {
         .await;
 
         // Should use routing and return Tmux
-        assert_eq!(result, DeliveryResult::Tmux);
+        assert!(matches!(
+            result,
+            DeliveryResult::Confirmed(DeliveryChannel::Tmux)
+        ));
         // routing.json should still exist
         assert!(agent_dir.join("routing.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+    use crate::services::agent_control::AgentType;
+    use proptest::prelude::*;
+
+    fn arb_meta() -> impl Strategy<Value = RecipientMeta> {
+        (
+            prop_oneof![
+                Just(AgentType::Claude),
+                Just(AgentType::Gemini),
+                Just(AgentType::Shoal),
+                Just(AgentType::Process),
+            ],
+            prop_oneof![Just(BackendType::Exomonad), Just(BackendType::CcNative)],
+        )
+            .prop_map(|(agent_type, backend_type)| RecipientMeta {
+                agent_type,
+                backend_type,
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn plan_is_subset_of_receivable_channels(meta in arb_meta()) {
+            let plan = delivery_plan(&meta);
+            let receivable = channels_recipient_can_receive(&meta);
+            for channel in &plan {
+                prop_assert!(
+                    receivable.contains(channel),
+                    "plan for {:?} contains {:?} which is not in receivable set {:?}",
+                    meta, channel, receivable
+                );
+            }
+        }
+
+        #[test]
+        fn plan_is_nonempty_iff_receivable_is_nonempty(meta in arb_meta()) {
+            let plan_empty = delivery_plan(&meta).is_empty();
+            let recv_empty = channels_recipient_can_receive(&meta).is_empty();
+            prop_assert_eq!(
+                plan_empty, recv_empty,
+                "plan/receivable emptiness mismatch for {:?}: plan_empty={}, recv_empty={}",
+                meta, plan_empty, recv_empty
+            );
+        }
+
+        #[test]
+        fn plan_has_no_duplicate_channels(meta in arb_meta()) {
+            let plan = delivery_plan(&meta);
+            let mut dedup: std::collections::BTreeSet<DeliveryChannel> = std::collections::BTreeSet::new();
+            for c in &plan {
+                prop_assert!(dedup.insert(*c), "duplicate channel {:?} in plan for {:?}", c, meta);
+            }
+        }
+    }
+
+    #[test]
+    fn claude_exomonad_plan_matches_spec() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Claude,
+            backend_type: BackendType::Exomonad,
+        };
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Teams, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn gemini_exomonad_plan_matches_spec() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Gemini,
+            backend_type: BackendType::Exomonad,
+        };
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Acp, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn process_is_undeliverable_on_both_backends() {
+        for backend in [BackendType::Exomonad, BackendType::CcNative] {
+            let meta = RecipientMeta {
+                agent_type: AgentType::Process,
+                backend_type: backend,
+            };
+            assert!(delivery_plan(&meta).is_empty());
+            assert!(channels_recipient_can_receive(&meta).is_empty());
+        }
+    }
+
+    #[test]
+    fn gemini_ccnative_is_undeliverable() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Gemini,
+            backend_type: BackendType::CcNative,
+        };
+        assert!(delivery_plan(&meta).is_empty());
+        assert!(channels_recipient_can_receive(&meta).is_empty());
     }
 }
