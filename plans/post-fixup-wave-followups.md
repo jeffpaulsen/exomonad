@@ -1,130 +1,197 @@
-# Post-Fixup-Wave Followups
+# Capability-Driven Honest-Typed Delivery Pipeline
 
-Four items surfaced by or left over from the 2026-04-16 fixup wave. Not urgent enough to have blocked the wave, but each is small and high-signal. Spec them as one parallel Gemini wave once the server is restarted with the wave's fixes live.
+## Context
 
-## 1. Poller treats Copilot `COMMENTED` reviews as no-review
+Today's investigation traced a class of silent message-delivery failures back to two complementary structural flaws in `rust/exomonad-core/src/services/delivery.rs`:
 
-### Problem
+1. **Recipient-agnostic priority chain.** `deliver_to_agent` tries Teams → ACP → UDS → tmux in a hardcoded order regardless of who the recipient is. For Gemini agents (which don't poll Claude Teams inboxes), the Teams write succeeds, the function returns immediately, and the message is never read. The async 30s verifier's tmux fallback only fires for Tier 1 (in-memory registered) recipients — Gemini leaves are Tier 2 (config.json scan), so the fallback is suppressed by the existing CC-native heuristic.
 
-Every PR in the wave hit `[REVIEW TIMEOUT]` even though Copilot reviewed 12 of 13 of them. Reason: Copilot leaves `state=COMMENTED` (summary body + inline comments) rather than `APPROVED` or `CHANGES_REQUESTED`. The GitHub poller's state machine in `rust/exomonad-core/src/services/github_poller.rs` only handles the approve/changes branches, so `COMMENTED` falls into the "no review yet" bucket. Result: 20+ actionable inline comments silently discarded across the wave, timeout forces a `force-merge`, feedback gone.
+2. **Dishonest result type.** `DeliveryResult::Teams` is returned the moment the JSON file is written to disk — not when the recipient has read it. Callers (and humans reading their `success: true` response) think delivery happened. Today, every `send_message` from root to a Gemini leaf returned `success: true` but landed in a dead-letter file. The only reason iteration cycles "worked" earlier in the day is that the GitHub poller's event handler injects Copilot review comments via a separate tmux path — my redundant `send_message` summaries were silently dropped, but the leaves had the comments anyway.
 
-### Scope
+PR #873 (just merged) added `agent_type` to `TeamInfo`. That data is the missing input both flaws need. This plan unifies fixes for both via a capability-driven plan + honest-typed result.
 
-Teach the poller that `COMMENTED` + non-empty inline-comment list means "review received, changes requested by implication." Fire the existing `PRReview::ReviewReceived` → `InjectMessage` path so the comments land in the leaf's pane. The leaf already knows how to handle that input.
+## Design
 
-### Change sites
+Two refactors landed together. They share an integration point (`execute_plan`), so doing them in one wave is less churn than sequencing.
 
-- `rust/exomonad-core/src/services/github_poller.rs` — `compute_pr_actions` / wherever it currently branches on `review_state`. Add a `COMMENTED` case that maps to `ReviewState::ChangesRequested` when inline comments exist. If no inline comments and the summary is purely informational, keep mapping to `None` (preserves the timeout fallback for empty reviews).
-- `rust/exomonad-core/src/services/copilot_review.rs` — same mapping if duplicated there.
-- Tests: one unit test per mapping branch (`COMMENTED` + inline comments → `ReviewReceived`; `COMMENTED` + no inline comments → `None`; `APPROVED` and `CHANGES_REQUESTED` unchanged). Live fixture lives in `tests/fixtures/copilot-reviews/` if helpful.
+### New types
 
-### Anti-patterns
+```rust
+enum DeliveryChannel { Teams, Acp, Uds, Tmux }
 
-- DO NOT treat every `COMMENTED` review as `CHANGES_REQUESTED` — Copilot sometimes leaves purely-informational summaries. The inline-comment count is the actionable signal.
-- DO NOT rework the `PRReview` event taxonomy. Just reuse `ReviewReceived`.
+enum ChannelOutcome {
+    Confirmed,                              // synchronous proof of receipt
+    Queued(oneshot::Receiver<VerifyOutcome>), // async verification (Teams only)
+    Failed(String),
+}
 
-### Verify
+enum DeliveryResult {
+    Confirmed(DeliveryChannel),
+    QueuedUnverified(DeliveryChannel, oneshot::Receiver<VerifyOutcome>),
+    Failed(FailureReason),
+}
 
-```
-cargo test -p exomonad-core --lib services::github_poller
-cargo test -p exomonad-core --lib services::copilot_review
-cargo clippy -p exomonad-core -- -D warnings
-```
-
-## 2. Post-hoc recovery of Copilot feedback on wave PRs
-
-### Problem
-
-The 13 PRs merged in the wave (see [Wave PRs](#wave-prs) below) silently dropped ~20 actionable Copilot comments. The changes are already in `main` but the feedback may point to real gaps.
-
-### Scope
-
-Pull all `COMMENTED` reviews + inline comments for the wave's PRs into one consolidated report at `docs/post-wave-copilot-audit-2026-04-16.md`. One section per PR: summary excerpt + each inline comment (file:line + text). Triage each as `action-needed` / `informational` / `already-addressed-by-other-PR`.
-
-This is a research task, not a fix — deliverable is the audit doc. Any actionable findings become separate follow-up PRs or go into the relevant sub-TL's backlog.
-
-### Data source
-
-```
-gh api repos/tidepool-heavy-industries/exomonad/pulls/{num}/reviews
-gh api repos/tidepool-heavy-industries/exomonad/pulls/{num}/comments
+struct RecipientMeta {
+    agent_type: AgentType,    // Claude / Gemini / Shoal / Process
+    backend_type: BackendType, // Exomonad / CcNative
+}
 ```
 
-### Wave PRs
+### Pure policy: `delivery_plan`
 
-`854, 855, 856, 857, 858, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869`
-
-### Verify
-
-Doc exists, covers every PR, each comment has a triage verdict. No code changes expected.
-
-## 3. `fork_wave` / `merge_pr` upstream tracking
-
-### Problem
-
-Fresh branches from `fork_wave` don't have `origin/<branch>` tracking set. Post-merge `git pull` inside `merge_pr` fails with "no tracking information for the current branch." `registries-tl` had to `git branch --set-upstream-to` manually twice during its wave. The registries-tl TL's honest-reporting fix from #849 is what caught this — previously it silently failed.
-
-### Scope
-
-Set upstream tracking at spawn time. Cleanest: `fork_wave` pushes the new branch and runs `git branch --set-upstream-to=origin/<branch>` in the worktree. Alternative: `merge_pr` does it lazily before pulling. Both are ~one line but the first is better — every branch gets tracking from birth, not just ones that end up merging.
-
-### Change sites
-
-- `rust/exomonad-core/src/services/agent_control/spawn.rs` or wherever `fork_wave` creates the worktree and initial push. After `git push -u origin HEAD` (which already sets upstream), verify it happened; if using `git push` without `-u`, add the flag.
-- Add a regression test: spawn a child in a temp repo, assert `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` returns a non-error.
-
-### Anti-patterns
-
-- DO NOT do both fork_wave-side and merge_pr-side — pick one and own it. Double-handling causes the "works locally, mysteriously broken elsewhere" class of bug.
-
-### Verify
-
-```
-cargo test -p exomonad-core --lib services::agent_control
-# Spot-check: spawn a test child, confirm upstream is set
+```rust
+fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude,  Exomonad) => vec![Teams, Tmux],   // CC reads Teams; tmux fallback
+        (Claude,  CcNative) => vec![Teams],          // CC-native: no exomonad worktree, no tmux
+        (Gemini,  Exomonad) => vec![Acp, Tmux],     // Gemini: no Teams (no poller); ACP if connected else tmux
+        (Gemini,  CcNative) => vec![],               // unreachable in practice; explicit Undeliverable
+        (Shoal,   Exomonad) => vec![Uds, Tmux],     // Shoal: HTTP-over-UDS primary
+        (Shoal,   CcNative) => vec![],
+        (Process, _)        => vec![],               // processes don't receive messages
+    }
+}
 ```
 
-## 4. Remaining `"model": "gemini"` hardcode in reconcile path
+This is the **single source of truth** for "who can receive on what." Adding a new agent type = adding rows. Compiler enforces exhaustiveness via match.
 
-### Problem
+### Mechanism: `execute_plan`
 
-`rust/claude-teams-bridge/src/registry.rs:284` still hardcodes `"model": "gemini"` and `"agentType": "exomonad-agent"` when it reconciles in-memory state into config.json (bonus finding from the registries-tl audit). Fires when an in-memory `register_team` call adds a member before `synthetic_members.rs` has written the honest type — rare race.
-
-messaging-tl explicitly deferred this because the proper fix requires extending `TeamInfo` to carry agent_type/model and threading it through the `register_team` effect proto. Non-trivial vs the other reconcile-path fixes.
-
-### Scope
-
-Extend `TeamInfo` (in `rust/claude-teams-bridge/src/registry.rs`) to carry `agent_type: AgentType` and `model: String` fields. Thread through:
-
-- `proto/effects/session.proto` — `RegisterTeamRequest` gains `agent_type: AgentType` (enum, matching the Rust AgentType) and `model: String`.
-- Haskell guest (`haskell/wasm-guest/src/ExoMonad/Guest/Effects/Session.hs`) — callers of `registerTeam` pass their role's type.
-- `rust/exomonad-core/src/handlers/session.rs::register_team` — accepts the new fields, stores them in `TeamInfo`.
-- `rust/claude-teams-bridge/src/registry.rs:284` — uses the stored values instead of the hardcoded strings.
-
-### Anti-patterns
-
-- DO NOT add a second `register_team_with_type` variant. Either the one call carries the fields or it doesn't.
-- Remember to regen Rust proto (`cargo build -p exomonad-proto`) AND Haskell proto (`just proto-gen-haskell`). Gemini historically forgets the Haskell side.
-
-### Verify
-
+```rust
+async fn execute_plan(
+    plan: Vec<DeliveryChannel>,
+    ctx: &(impl Has*),
+    /* other args */,
+) -> DeliveryResult {
+    for channel in plan {
+        match try_channel(channel, ctx, ...).await {
+            Ok(ChannelOutcome::Confirmed)   => return DeliveryResult::Confirmed(channel),
+            Ok(ChannelOutcome::Queued(rx))  => return DeliveryResult::QueuedUnverified(channel, rx),
+            Err(_)                          => continue,
+        }
+    }
+    DeliveryResult::Failed(FailureReason::AllChannelsExhausted)
+}
 ```
-just proto-gen-haskell
-cargo build -p exomonad-proto
+
+`try_channel` dispatches to per-channel helpers (`try_teams_channel`, `try_acp_channel`, `try_uds_channel`, `try_tmux_channel`). Each returns honest outcome:
+- `try_teams_channel`: writes to inbox, returns `Queued(rx)` carrying the verifier's oneshot
+- `try_acp_channel`: prompts via ACP, returns `Confirmed` on ack
+- `try_uds_channel`: POSTs over UDS, returns `Confirmed` on 2xx
+- `try_tmux_channel`: injects via tmux, returns `Confirmed` on successful inject
+
+### Caller contract
+
+`deliver_to_agent` is renamed `route_to_recipient` (or kept as a thin wrapper for migration ease) and returns the new `DeliveryResult`. Callers pattern-match:
+- `notify_parent_delivery`: fire-and-forget — log all three variants, treat `Confirmed` and `QueuedUnverified` as success-paths, `Failed` as failure
+- `send_message` MCP handler: same — but the response to the calling agent now distinguishes "Confirmed via X" vs "Queued (delivery unverified)" so callers don't get a false-positive
+
+## Wave Plan (Sub-TL: `delivery-refactor`)
+
+Spawned as a Claude sub-TL via `fork_wave` (depth-2 makes sense given the cross-cutting scope). Sub-TL runs scaffold-fork-converge.
+
+### Scaffold commit (sub-TL writes)
+
+Adds new type definitions to `rust/exomonad-core/src/services/delivery.rs` ALONGSIDE existing types (don't break anything yet):
+
+```rust
+// New, unused yet:
+enum DeliveryChannel { ... }
+enum ChannelOutcome { ... }
+enum NewDeliveryResult { ... }  // temporarily named
+enum FailureReason { ... }
+struct RecipientMeta { ... }
+fn delivery_plan(...) -> Vec<DeliveryChannel> { todo!() }  // stub
+```
+
+Commit + push. Children fork from here — they all see the agreed-upon shapes.
+
+### Wave 1 (parallel Gemini leaves, zero deps)
+
+**Leaf 1: `delivery-plan-pure`**
+- Implement `delivery_plan` pure function (the match table above)
+- Add a separate `fn channels_recipient_can_receive(meta: &RecipientMeta) -> BTreeSet<DeliveryChannel>` (the inverse view — what channels the recipient CAN read on, derived from agent_type + backend_type)
+- Property test: for every `(AgentType, BackendType)` pair, `delivery_plan(meta) ⊆ channels_recipient_can_receive(meta)`. This is the regression-killer — silent dead-letter routing becomes structurally impossible.
+- Property test: plan is non-empty for every (agent_type, backend_type) where receivable channels is non-empty.
+- Touched: `delivery.rs` only.
+
+**Leaf 2: `execute-plan-channels`**
+- Refactor existing per-channel logic in `deliver_to_agent` into 4 functions:
+  - `async fn try_teams_channel(ctx, ...) -> Result<ChannelOutcome>` — moves existing Teams write + verifier-spawn into here, returns `Queued(rx)` carrying the verifier's oneshot
+  - `async fn try_acp_channel(...) -> Result<ChannelOutcome>` — existing ACP code, returns `Confirmed` on ack
+  - `async fn try_uds_channel(...) -> Result<ChannelOutcome>` — existing UDS code
+  - `async fn try_tmux_channel(...) -> Result<ChannelOutcome>` — existing tmux code, returns `Confirmed` on inject success
+- Implement `execute_plan` (the for-loop above). Calls `try_channel` which dispatches to the 4 helpers via a match on `DeliveryChannel`.
+- Unit tests: each `try_channel` helper tested in isolation against IsolatedTmux / mock registries. `execute_plan` tested with synthetic plans that should fall through (e.g., `[Acp, Tmux]` where ACP fails → tmux succeeds).
+- Touched: `delivery.rs` only.
+
+### Integration commit (sub-TL writes after Wave 1 merges)
+
+Wires the new pieces together by:
+1. Renaming `deliver_to_agent` to a thin compat wrapper that calls `delivery_plan` then `execute_plan`, mapping the new `DeliveryResult` to the old enum variants for transitional caller compatibility.
+2. Verifies build green.
+
+### Wave 2 (single Gemini leaf)
+
+**Leaf 3: `caller-migration`**
+- Update all callers of `deliver_to_agent` / `notify_parent_delivery` / `route_message` to pattern-match the new `DeliveryResult` directly (no compat wrapper).
+- Caller sites (per the audit done in this plan):
+  - `rust/exomonad-core/src/handlers/events.rs` — `send_message` and `notify_parent` tool handlers
+  - `rust/exomonad-core/src/services/delivery.rs` — `notify_parent_delivery` itself
+  - `rust/exomonad-core/src/services/github_poller.rs` — event handler `InjectMessage` and `NotifyParentAction` paths
+- Remove the compat wrapper from the integration commit.
+- The MCP tool response for `send_message` should now expose `confirmed` / `queued` / `failed` outcomes honestly (Haskell-side may need an enum wrapping, or just a `delivery_method` + `confirmed: bool` pair).
+- Touched: `handlers/events.rs`, `services/delivery.rs`, `services/github_poller.rs`. Possibly `haskell/wasm-guest/src/ExoMonad/Guest/Tools/Events.hs` for the response shape.
+
+### Sub-TL files PR to main after Wave 2 merges + integration verified.
+
+## Critical Files
+
+| File | Change |
+|------|--------|
+| `rust/exomonad-core/src/services/delivery.rs` | All new types + `delivery_plan` + `execute_plan` + per-channel helpers; `deliver_to_agent` rewritten |
+| `rust/exomonad-core/src/handlers/events.rs` | Caller migration to new `DeliveryResult` |
+| `rust/exomonad-core/src/services/github_poller.rs` | Caller migration |
+| `haskell/wasm-guest/src/ExoMonad/Guest/Tools/Events.hs` | Possibly: surface honest delivery status in `send_message` response |
+
+## Anti-Patterns (Spawn Spec Front-Matter)
+
+- **DO NOT** preserve the old `DeliveryResult` enum after caller migration — full removal forces every caller to be updated.
+- **DO NOT** add a "if recipient is Gemini, skip Teams" `if` branch anywhere outside `delivery_plan`. The plan function is the single source of truth.
+- **DO NOT** make Teams a synchronous-blocking write. The 30s verifier stays async; `try_teams_channel` returns `Queued(rx)` not `Confirmed`.
+- **DO NOT** duplicate the receivable-channels table — derive `channels_recipient_can_receive` from `(agent_type, backend_type)` ONCE.
+- **DO NOT** widen `RecipientMeta` beyond `agent_type` + `backend_type` without strong justification.
+
+## Verification
+
+```bash
+cargo build --workspace
 cargo test --workspace --lib
-# WASM rebuild
-just wasm-all
+cargo clippy --workspace -- -D warnings
+
+# Per-leaf:
+# Leaf 1
+cargo test -p exomonad-core --lib services::delivery::plan
+# Leaf 2
+cargo test -p exomonad-core --lib services::delivery::execute
+# Leaf 3 + integration
+cargo test -p exomonad-core --lib services::delivery
+cargo test -p exomonad-core --lib handlers::events
 ```
 
-## Execution
+### Live smoke test (run after restart)
 
-All four are independent — spawn as a single Gemini wave after server restart:
+1. Spawn a Gemini leaf via `spawn_gemini`.
+2. From root: `send_message(recipient=<the-leaf>, content="ping")`.
+3. Expect response: `{delivery_method: "tmux", confirmed: true}` (NOT `teams_inbox`).
+4. Expect: the leaf actually receives the message in its pane within 1s (NOT 30s+ via verifier fallback).
+5. Confirm in `.exo/logs/sidecar.log` that NO Teams inbox write occurred for this message — only a tmux injection.
 
-| Leaf | Item | Effort |
-|------|------|--------|
-| `poller-commented-state-gemini` | #1 | small (~30 lines + tests) |
-| `copilot-feedback-audit-worker` | #2 | medium (research, no code) — use `spawn_worker` (ephemeral), not `spawn_gemini` |
-| `fork-wave-upstream-gemini` | #3 | small |
-| `register-team-honest-type-gemini` | #4 | medium (proto changes) |
+This smoke test is the user-facing proof the bug is fixed. If it passes, the silent dead-letter class of bug is gone.
 
-Item #1 is the highest ROI — it stops every future wave from bleeding Copilot feedback. Prioritize if doing them sequentially.
+## Why This Shape
+
+- **Sub-TL** (not a single leaf) because it's cross-cutting — types + plan + executor + per-channel + callers — and benefits from scaffold-fork-converge with intermediate integration.
+- **Two waves** because Wave 1 leaves are independent (different functions), but Wave 2 depends on Wave 1's API being stable.
+- **Property tests as the regression safety net.** Plan ⊆ receivable invariant means future agent-type additions can't introduce silent dead-letters without `cargo test` failing.
+- **Honest types** make the bug structurally unrepresentable. `Confirmed(channel)` requires a synchronous proof; `QueuedUnverified` carries the verification handle so callers who need certainty can await it.
